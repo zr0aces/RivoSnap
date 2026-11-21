@@ -35,6 +35,21 @@ The application uses cards and lists, not data tables. The dashboard visualizati
 
 At 820px the gallery workspace occupied 820px, with two filter columns. At 821px it occupied 597px, with four fields and Reset on one row. Neither page showed root overflow: measuring only document width misses this regression.
 
+### Task 1 fixture baseline (Chromium, rounded CSS pixels)
+
+| Viewport width | Workspace | Sign-out right | Gallery cols | Health cols | Rail cols | Filter min | First card top | Login submit bottom | Setup submit bottom | Mobile Health height | Sidebar width | Dashboard footer top |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 320 | 710 | 696 | 3 | 2 | 2 | 316 | 561 | 591 | 735 | 22 | 710 | — |
+| 375 | 710 | 696 | 3 | 2 | 2 | 316 | 561 | 729 | 765 | 22 | 710 | — |
+| 430 | 710 | 696 | 3 | 2 | 2 | 316 | 584 | 814 | 844 | 22 | 710 | — |
+| 768 | 768 | 754 | 3 | 3 | 2 | 334 | 626 | 877 | 907 | 22 | 768 | — |
+| 819 | 819 | 805 | 3 | 3 | 2 | 358 | 620 | 877 | 907 | 22 | 819 | — |
+| 820 | 820 | 806 | 3 | 3 | 2 | 358 | 620 | 877 | 907 | 22 | 820 | — |
+| 821 | 597 | 207 | 2 | 2 | 3 | 96 | 342 | 636 | 708 | — | 224 | 1313 |
+| 1024 | 800 | 207 | 3 | 3 | 3 | 143 | 345 | 508 | 569 | — | 224 | 1070 |
+| 1366 | 1142 | 207 | 5 | 4 | 3 | 222 | 352 | 508 | 569 | — | 224 | 1045 |
+| 1920 | 1480 | 207 | 6 | 5 | 3 | 303 | 352 | 664 | 725 | — | 224 | 1045 |
+
 ## Prioritized findings and page treatment
 
 Rows marked † rest wholly or partly on phone measurements taken while the shell was 716px wide. Treat their phone-width treatment as provisional until Task 5 remeasures them; desktop and long-name evidence is unaffected.
@@ -69,7 +84,7 @@ Rows marked † rest wholly or partly on phone measurements taken while the shel
 
 Each task ships, and is reviewed, on its own. Run `corepack pnpm typecheck`, `corepack pnpm build` and `corepack pnpm e2e` after every task. The Playwright browsers need system libraries that this host currently lacks (`libatk-1.0.so.0`). Either install them as the README describes (`corepack pnpm exec playwright install --with-deps chromium`), or start `corepack pnpm exec vite apps/web --host 127.0.0.1 --port 4173` and run the suite inside `mcr.microsoft.com/playwright:v1.65.1-noble` with `--network host` and `E2E_URL=http://127.0.0.1:4173`. The container image version must match the installed `@playwright/test`. Tasks 1–4 are fully specified. Task 5 replaces Tasks 6–7 with surface-by-surface tasks written from the remeasured evidence.
 
-- [ ] **Task 1: Commit the responsive harness and baseline (no CSS changes).**
+- [x] **Task 1: Commit the responsive harness and baseline (no CSS changes).**
   - Create `e2e/fixtures.ts`. Export `mockApi(page, data)`, which installs the `page.route("**/api/v1/**", …)` handler used in `e2e/gallery.spec.ts`. Also export two datasets:
     - `normal`, with an owner session, populated groups, images (portrait, landscape, video), queue items, albums, degraded health and a connected Google account;
     - `stress`, which is `normal` plus a 150-character unbroken group name, a Thai group name, a 64-character LINE group ID, a 300-character queue error and counts above 10,000.
