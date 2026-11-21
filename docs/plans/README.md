@@ -4,6 +4,7 @@ Add a link under **Active** when a plan is created; move it to **Completed** whe
 
 ## Active
 
+- [Application-wide responsive design](2026-11-22-responsive-design.md) — Contain the mobile shell, adapt page layouts and verify all seven target viewports.
 
 ## Completed
 

@@ -1,25 +1,37 @@
+# Environment
 .env
 .env.*
 !.env.example
+*.local
+
+# Dependencies and build outputs
 node_modules/
 dist/
 !/internal/web/dist/
 /internal/web/dist/*
 !/internal/web/dist/.keep
+.pnpm-store/
+.vite/
+*.tsbuildinfo
+
+# Test, coverage and diagnostic outputs
 test-results/
 playwright-report/
+playwright/.auth/
+playwright/.cache/
+blob-report/
+coverage/
+*.log
+*.tmp
+*.bak
+tmp/
+
+# Local overrides and backups
 docker-compose.override.yml
 *.dump
 
-# Local build, test and diagnostic output
-.pnpm-store/
-coverage/
-*.tsbuildinfo
-*.log
-playwright/.auth/
+# Knowledge graph and local tool state
 graphify-out/
-
-# Private tool state; keep shared project instructions visible
 .claude/settings.local.json
 .claude/worktrees/
 .codex/
@@ -27,3 +39,9 @@ graphify-out/
 .worktrees/
 cache/
 .DS_Store
+.agent-parity/
+# agent-parity:begin
+!/.codex/
+/.claude/*
+!/.claude/settings.json
+# agent-parity:end
