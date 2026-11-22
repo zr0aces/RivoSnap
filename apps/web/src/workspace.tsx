@@ -1,3 +1,4 @@
+import "./workspace-responsive.css";
 import { Onboarding } from "./onboarding";
 import { useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -224,7 +225,7 @@ function AlbumsView() {
       )}
       {groups.length > 0 && (
         <div className="albumToolbar">
-          <div className="albumTabs" role="tablist" aria-label="Filter albums">
+          <div className="albumTabs" role="group" aria-label="Filter albums">
             {(
               [
                 ["all", `All (${groups.length})`],
@@ -235,8 +236,7 @@ function AlbumsView() {
               <button
                 key={k}
                 type="button"
-                role="tab"
-                aria-selected={filter === k}
+                aria-pressed={filter === k}
                 className={"albumTab" + (filter === k ? " active" : "")}
                 onClick={() => setFilter(k)}
               >
@@ -398,14 +398,7 @@ export function Groups({ albums = false }: { albums?: boolean }) {
                   Verified app-created album ID (blank if none created)
                   <input name="albumId" />
                 </label>
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    fontWeight: 500,
-                  }}
-                >
+                <label className="resolveAck">
                   <input
                     type="checkbox"
                     checked={!!checkedMap[g.id]}
@@ -487,17 +480,29 @@ export function Settings() {
     q = query<Prefs>("/settings"),
     google = query<{ status: string; lastError?: string }>("/google/status"),
     action = useAction(),
+    [feedbackSection, setFeedbackSection] = useState(""),
     [editingLine, setEditingLine] = useState(false);
   if (!q.data) return <p>{q.error?.message ?? "Loading settings…"}</p>;
   const d = q.data;
   const connected = google.data?.status === "CONNECTED";
   const showLineForm = !d.lineConfigured || editingLine;
 
+  function run(section: string, perform: () => Promise<unknown>, success: string) {
+    setFeedbackSection(section);
+    return action.run(perform, success);
+  }
+  const feedback = (section: string) => (
+    <p className="sectionFeedback" role="status">
+      {feedbackSection === section ? action.msg : ""}
+    </p>
+  );
+
   function save(e: FormEvent<HTMLFormElement>, kind: string) {
     e.preventDefault();
     const form = e.currentTarget,
       data = Object.fromEntries(new FormData(form));
-    void action.run(
+    void run(
+      kind,
       async () => {
         await api(
           kind === "line" ? "/settings/line" : "/settings",
@@ -524,14 +529,6 @@ export function Settings() {
         title="Settings"
         sub="Control where group media arrives, what gets saved, and how long copies stay local."
       />
-      {googleError && (
-        <p role="alert">
-          {googleErrors[googleError] ?? googleErrors.exchange}
-        </p>
-      )}
-      <p role="status" aria-live="polite">
-        {action.msg}
-      </p>
       <div className="settingsLedger">
         <div className="routeStrip" aria-label="Active media pipeline">
           <div className="routeNode">
@@ -634,6 +631,7 @@ export function Settings() {
                 </Button>
               </div>
             )}
+            {feedback("line")}
           </form>
         </section>
 
@@ -656,7 +654,8 @@ export function Settings() {
                 variant={d.collectVideos ? "default" : "secondary"}
                 aria-pressed={d.collectVideos}
                 onClick={() =>
-                  action.run(
+                  run(
+                    "rules",
                     () =>
                       api("/settings", "PATCH", {
                         collectVideos: !d.collectVideos,
@@ -670,6 +669,7 @@ export function Settings() {
                 {d.collectVideos ? "Enabled" : "Disabled"}
               </Button>
             </div>
+            {feedback("rules")}
             <div className="ruleRow" style={{ borderBottom: 0, paddingBottom: 0 }}>
               <div>
                 <b>Collect photos</b>
@@ -691,6 +691,9 @@ export function Settings() {
             <p>Where synced albums live.</p>
           </div>
           <div className="ledgerMain">
+            {googleError && (
+              <p role="alert">{googleErrors[googleError] ?? googleErrors.exchange}</p>
+            )}
             {google.data?.lastError && (
               <p className="pill err" style={{ marginBottom: 10 }}>
                 {google.data.lastError}
@@ -707,7 +710,8 @@ export function Settings() {
                     disabled={action.busy}
                     variant="default"
                     onClick={() =>
-                      action.run(
+                      run(
+                        "google",
                         () => api("/google/validate", "POST"),
                         "Google connection validated.",
                       )
@@ -729,7 +733,8 @@ export function Settings() {
                   variant="ghost"
                   className="dangerGhost"
                   onClick={() =>
-                    action.run(
+                    run(
+                      "google",
                       () => api("/google/disconnect", "POST"),
                       "Google disconnected.",
                     )
@@ -739,6 +744,7 @@ export function Settings() {
                 </Button>
               )}
             </div>
+            {feedback("google")}
           </div>
         </section>
 
@@ -777,6 +783,7 @@ export function Settings() {
               and are never silently discarded.
             </div>
             <Button disabled={action.busy}>Save retention</Button>
+            {feedback("retention")}
           </form>
         </section>
       </div>
@@ -793,6 +800,8 @@ export function healthStatus(
   if (v === "Online" || v === "PONG") return "ok";
   return "err";
 }
+
+declare const __APP_VERSION__: string;
 
 export function Health() {
   const q = query<Record<string, string | boolean>>("/health");
@@ -825,6 +834,7 @@ export function Health() {
           );
         })}
       </div>
+      <small className="appVersion">v{__APP_VERSION__}</small>
     </>
   );
 }

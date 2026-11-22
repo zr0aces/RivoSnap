@@ -1,0 +1,119 @@
+.filterContainer,
+.queue {
+  container-type: inline-size;
+}
+
+.filters .filterToggle,
+.filters .filterSummary {
+  display: none;
+}
+
+.filterFields {
+  display: contents;
+}
+
+@container (max-width: 460px) {
+  .filterContainer > .filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .filters .filterToggle {
+    display: inline-flex;
+  }
+
+  .filters .filterSummary {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 0.84rem;
+  }
+
+  .filters .filterFields {
+    display: none;
+  }
+
+  .filters .filterFields[data-open="true"] {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+    gap: 10px;
+    flex-basis: 100%;
+  }
+
+  .filters .button,
+  .filters select,
+  .filters input {
+    min-height: 44px;
+  }
+
+  .filters select,
+  .filters input {
+    font-size: max(1rem, 16px);
+  }
+}
+
+@container (max-width: 660px) {
+  .queue > .queueRow {
+    grid-template-columns: 56px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .queueRow .queueSummary {
+    display: contents;
+  }
+
+  .queueRow .queueActions,
+  .queueRow .queueIssue {
+    grid-column: 1 / -1;
+  }
+
+  .queueActions .button {
+    min-height: 44px;
+  }
+}
+
+dialog.viewer {
+  padding-block: max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-bottom));
+  padding-inline: max(16px, env(safe-area-inset-left))
+    max(16px, env(safe-area-inset-right));
+}
+
+.viewer .viewerHead {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.viewerTitle,
+.viewerControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.viewerTitle {
+  max-height: 24dvh;
+  overflow: auto;
+}
+
+.viewerControls {
+  justify-content: flex-end;
+}
+
+.viewerControls .button {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+dialog.viewer > img,
+dialog.viewer > video {
+  min-height: 0;
+  min-width: 0;
+  max-height: 100%;
+}
