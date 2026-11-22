@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RivoSnap — Family Orange Theme Suggestions</title>
+    <style>
+      :root {
+        --page-bg: #f4f1ed;
+        --page-text: #221d1a;
+        --page-muted: #6e645e;
+        --page-border: #e3dcd5;
+        font-family: "Plus Jakarta Sans", "Nunito", ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--page-bg);
+        color: var(--page-text);
+        line-height: 1.5;
+        padding: 32px 20px 64px;
+      }
+
+      .container {
+        max-width: 1320px;
+        margin: 0 auto;
+      }
+
+      /* Top control bar */
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 32px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--page-border);
+      }
+
+      .topbar h1 {
+        margin: 0;
+        font-size: 1.5rem;
+        letter-spacing: -0.02em;
+      }
+
+      .topbar p {
+        margin: 4px 0 0;
+        color: var(--page-muted);
+        font-size: 0.92rem;
+      }
+
+      .view-controls {
+        display: inline-flex;
+        background: #e9e3dc;
+        padding: 4px;
+        border-radius: 999px;
+        gap: 4px;
+      }
+
+      .view-controls button {
+        border: 0;
+        background: transparent;
+        color: #5b524c;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 600;
+        padding: 8px 16px;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+
+      .view-controls button.active {
+        background: #ffffff;
+        color: #1e1916;
+        box-shadow: 0 2px 8px rgba(40, 20, 5, 0.08);
+      }
+
+      /* Theme section */
+      .theme-section {
+        margin-bottom: 48px;
+      }
+
+      .theme-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .theme-header h2 {
+        margin: 0;
+        font-size: 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .theme-badge {
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: #fff;
+        border: 1px solid var(--page-border);
+        color: var(--page-muted);
+      }
+
+      .theme-desc {
+        margin: 0;
+        color: var(--page-muted);
+        font-size: 0.9rem;
+      }
+
+      /* Mode grid */
+      .mode-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+      }
+
+      body[data-view="light"] .mode-grid {
+        grid-template-columns: 1fr;
+      }
+      body[data-view="light"] .preview-card[data-mode="dark"] {
+        display: none;
+      }
+      body[data-view="dark"] .mode-grid {
+        grid-template-columns: 1fr;
+      }
+      body[data-view="dark"] .preview-card[data-mode="light"] {
+        display: none;
+      }
+
+      @media (max-width: 980px) {
+        .mode-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* Preview card using CSS custom properties per theme+mode */
+      .preview-card {
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 22px;
+        box-shadow: 0 12px 32px var(--shadow);
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .mode-label-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .mode-pill {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: var(--elevated);
+        color: var(--muted);
+        border: 1px solid var(--border);
+      }
+
+      /* Mock app navbar */
+      .mock-nav {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 12px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        font-size: 1rem;
+        letter-spacing: -0.01em;
+      }
+
+      .brand-mark {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        background: var(--primary);
+        color: var(--on-primary);
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        font-size: 0.95rem;
+        box-shadow: 0 4px 12px var(--primary-glow);
+      }
+
+      .nav-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        border: 0;
+        font: inherit;
+        font-size: 0.84rem;
+        font-weight: 700;
+        padding: 8px 16px;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: transform 0.12s ease, background 0.15s ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: var(--on-primary);
+        box-shadow: 0 4px 12px var(--primary-glow);
+      }
+
+      .btn-primary:hover {
+        background: var(--primary-hover);
+      }
+
+      .btn-secondary {
+        background: var(--secondary);
+        color: var(--on-secondary);
+      }
+
+      .btn-ghost {
+        background: var(--elevated);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+
+      /* Stat row */
+      .stats-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .stat-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 12px 14px;
+      }
+
+      .stat-label {
+        font-size: 0.75rem;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .stat-value {
+        font-size: 1.25rem;
+        font-weight: 800;
+        margin-top: 2px;
+      }
+
+      .stat-tag {
+        display: inline-block;
+        margin-top: 4px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: var(--elevated);
+        color: var(--primary);
+      }
+
+      /* Family album cards */
+      .album-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .album-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        overflow: hidden;
+        transition: transform 0.15s ease;
+      }
+
+      .album-card:hover {
+        transform: translateY(-2px);
+      }
+
+      .album-art {
+        height: 92px;
+        position: relative;
+        overflow: hidden;
+        display: flex;
+        align-items: flex-end;
+        padding: 10px;
+      }
+
+      .album-art.art-1 {
+        background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+      }
+
+      .album-art.art-2 {
+        background: linear-gradient(135deg, var(--secondary) 0%, var(--primary) 100%);
+      }
+
+      .album-pill {
+        background: rgba(255, 255, 255, 0.9);
+        color: #1f1916;
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 3px 9px;
+        border-radius: 999px;
+      }
+
+      .album-body {
+        padding: 12px 14px;
+      }
+
+      .album-title {
+        font-weight: 700;
+        font-size: 0.94rem;
+        margin: 0;
+      }
+
+      .album-meta {
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+
+      /* Search + Toast row */
+      .interactive-row {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr;
+        gap: 12px;
+        align-items: center;
+      }
+
+      @media (max-width: 560px) {
+        .stats-row,
+        .album-grid,
+        .interactive-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .mock-input {
+        width: 100%;
+        background: var(--surface);
+        color: var(--text);
+        border: 1.5px solid var(--border);
+        border-radius: 14px;
+        padding: 10px 14px;
+        font: inherit;
+        font-size: 0.85rem;
+        outline: none;
+      }
+
+      .mock-input:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px var(--primary-glow);
+      }
+
+      .mock-toast {
+        background: var(--elevated);
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--accent);
+        border-radius: 14px;
+        padding: 10px 12px;
+        font-size: 0.8rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .mock-toast strong {
+        color: var(--text);
+      }
+
+      .mock-toast span {
+        color: var(--muted);
+      }
+
+      /* Swatch strip */
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+        gap: 8px;
+        padding-top: 6px;
+        border-top: 1px dashed var(--border);
+      }
+
+      .swatch {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 6px;
+        cursor: pointer;
+        text-align: left;
+        font: inherit;
+        color: var(--text);
+        transition: border-color 0.12s ease;
+      }
+
+      .swatch:hover {
+        border-color: var(--primary);
+      }
+
+      .swatch-color {
+        height: 24px;
+        border-radius: 8px;
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        margin-bottom: 5px;
+      }
+
+      .swatch-name {
+        display: block;
+        font-size: 0.7rem;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .swatch-hex {
+        display: block;
+        font-size: 0.68rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--muted);
+      }
+
+      .copy-toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #1f1916;
+        color: #fff7ed;
+        padding: 10px 16px;
+        border-radius: 999px;
+        font-size: 0.84rem;
+        font-weight: 600;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+        opacity: 0;
+        transform: translateY(8px);
+        pointer-events: none;
+        transition: opacity 0.18s ease, transform 0.18s ease;
+      }
+
+      .copy-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* =========================================
+         THEME 1: Sunlit Apricot & Berry
+      ========================================= */
+      .theme-apricot[data-mode="light"] {
+        --bg: #fff9f3;
+        --surface: #ffffff;
+        --elevated: #fff2e6;
+        --primary: #f97316;
+        --primary-hover: #ea580c;
+        --on-primary: #ffffff;
+        --primary-glow: rgba(249, 115, 22, 0.22);
+        --secondary: #0d9488;
+        --on-secondary: #ffffff;
+        --accent: #ec4899;
+        --text: #29201b;
+        --muted: #78685f;
+        --border: #f2e2d4;
+        --shadow: rgba(120, 53, 15, 0.08);
+      }
+
+      .theme-apricot[data-mode="dark"] {
+        --bg: #1c1512;
+        --surface: #261d18;
+        --elevated: #31251f;
+        --primary: #fb923c;
+        --primary-hover: #f97316;
+        --on-primary: #1c1512;
+        --primary-glow: rgba(251, 146, 60, 0.25);
+        --secondary: #2dd4bf;
+        --on-secondary: #102a27;
+        --accent: #f472b6;
+        --text: #fff7ed;
+        --muted: #b8a398;
+        --border: #3d2e26;
+        --shadow: rgba(0, 0, 0, 0.35);
+      }
+
+      /* =========================================
+         THEME 2: Honeycomb & Terracotta
+      ========================================= */
+      .theme-honeycomb[data-mode="light"] {
+        --bg: #fbf6ee;
+        --surface: #ffffff;
+        --elevated: #f5ebdc;
+        --primary: #e85d04;
+        --primary-hover: #d04e00;
+        --on-primary: #ffffff;
+        --primary-glow: rgba(232, 93, 4, 0.22);
+        --secondary: #f59e0b;
+        --on-secondary: #2b2118;
+        --accent: #4d7c0f;
+        --text: #2b2118;
+        --muted: #736255;
+        --border: #eadccb;
+        --shadow: rgba(105, 62, 18, 0.08);
+      }
+
+      .theme-honeycomb[data-mode="dark"] {
+        --bg: #1a1410;
+        --surface: #241c16;
+        --elevated: #2f251e;
+        --primary: #f48c06;
+        --primary-hover: #faa307;
+        --on-primary: #1a1410;
+        --primary-glow: rgba(244, 140, 6, 0.25);
+        --secondary: #fbbf24;
+        --on-secondary: #1a1410;
+        --accent: #84cc16;
+        --text: #faf3eb;
+        --muted: #b5a191;
+        --border: #3b2e24;
+        --shadow: rgba(0, 0, 0, 0.38);
+      }
+
+      /* =========================================
+         THEME 3: Clementine & Sky
+      ========================================= */
+      .theme-clementine[data-mode="light"] {
+        --bg: #fffbf7;
+        --surface: #ffffff;
+        --elevated: #fff0e5;
+        --primary: #ff6b2c;
+        --primary-hover: #e85518;
+        --on-primary: #ffffff;
+        --primary-glow: rgba(255, 107, 44, 0.24);
+        --secondary: #0ea5e9;
+        --on-secondary: #ffffff;
+        --accent: #facc15;
+        --text: #1e1b18;
+        --muted: #6e655f;
+        --border: #f0e4da;
+        --shadow: rgba(120, 50, 20, 0.08);
+      }
+
+      .theme-clementine[data-mode="dark"] {
+        --bg: #16141a;
+        --surface: #211d26;
+        --elevated: #2c2733;
+        --primary: #ff8552;
+        --primary-hover: #ff6b2c;
+        --on-primary: #16141a;
+        --primary-glow: rgba(255, 133, 82, 0.25);
+        --secondary: #38bdf8;
+        --on-secondary: #0c2330;
+        --accent: #fde047;
+        --text: #faf8fc;
+        --muted: #aca3b5;
+        --border: #36303e;
+        --shadow: rgba(0, 0, 0, 0.4);
+      }
+    </style>
+  </head>
+  <body data-view="both">
+    <div class="container">
+      <header class="topbar">
+        <div>
+          <h1>RivoSnap · Family Orange Theme Previews</h1>
+          <p>
+            3 warm, fun Light + Dark palettes with Orange as primary. Click any color swatch to copy its hex code.
+          </p>
+        </div>
+        <div class="view-controls" role="group" aria-label="View mode">
+          <button type="button" class="active" data-set-view="both">Side-by-Side</button>
+          <button type="button" data-set-view="light">Light Only</button>
+          <button type="button" data-set-view="dark">Dark Only</button>
+        </div>
+      </header>
+
+      <main id="themes-root"></main>
+    </div>
+
+    <div class="copy-toast" id="copy-toast">Copied</div>
+
+    <script>
+      const THEMES = [
+        {
+          id: "apricot",
+          className: "theme-apricot",
+          name: "1. Sunlit Apricot & Berry",
+          badge: "Cheerful & Energetic",
+          desc: "Warm milk canvas keeps family photos crisp; playful teal and berry accents bring Saturday-morning energy.",
+          swatches: {
+            light: [
+              ["Bg", "#FFF9F3"],
+              ["Surface", "#FFFFFF"],
+              ["Elevated", "#FFF2E6"],
+              ["Primary", "#F97316"],
+              ["Secondary", "#0D9488"],
+              ["Accent", "#EC4899"],
+              ["Text", "#29201B"],
+              ["Muted", "#78685F"],
+              ["Border", "#F2E2D4"],
+            ],
+            dark: [
+              ["Bg", "#1C1512"],
+              ["Surface", "#261D18"],
+              ["Elevated", "#31251F"],
+              ["Primary", "#FB923C"],
+              ["Secondary", "#2DD4BF"],
+              ["Accent", "#F472B6"],
+              ["Text", "#FFF7ED"],
+              ["Muted", "#B8A398"],
+              ["Border", "#3D2E26"],
+            ],
+          },
+        },
+        {
+          id: "honeycomb",
+          className: "theme-honeycomb",
+          name: "2. Honeycomb & Terracotta",
+          badge: "Cozy Storybook",
+          desc: "Toasted linen tones with honey gold and leafy sage — calm, nostalgic, and lets family photos stay the hero.",
+          swatches: {
+            light: [
+              ["Bg", "#FBF6EE"],
+              ["Surface", "#FFFFFF"],
+              ["Elevated", "#F5EBDC"],
+              ["Primary", "#E85D04"],
+              ["Secondary", "#F59E0B"],
+              ["Accent", "#4D7C0F"],
+              ["Text", "#2B2118"],
+              ["Muted", "#736255"],
+              ["Border", "#EADCCB"],
+            ],
+            dark: [
+              ["Bg", "#1A1410"],
+              ["Surface", "#241C16"],
+              ["Elevated", "#2F251E"],
+              ["Primary", "#F48C06"],
+              ["Secondary", "#FBBF24"],
+              ["Accent", "#84CC16"],
+              ["Text", "#FAF3EB"],
+              ["Muted", "#B5A191"],
+              ["Border", "#3B2E24"],
+            ],
+          },
+        },
+        {
+          id: "clementine",
+          className: "theme-clementine",
+          name: "3. Clementine & Sky",
+          badge: "Modern Toybox",
+          desc: "Juicy clementine, sky blue, and sunshine yellow; dark mode uses warm plum-charcoal for cozy depth.",
+          swatches: {
+            light: [
+              ["Bg", "#FFFBF7"],
+              ["Surface", "#FFFFFF"],
+              ["Elevated", "#FFF0E5"],
+              ["Primary", "#FF6B2C"],
+              ["Secondary", "#0EA5E9"],
+              ["Accent", "#FACC15"],
+              ["Text", "#1E1B18"],
+              ["Muted", "#6E655F"],
+              ["Border", "#F0E4DA"],
+            ],
+            dark: [
+              ["Bg", "#16141A"],
+              ["Surface", "#211D26"],
+              ["Elevated", "#2C2733"],
+              ["Primary", "#FF8552"],
+              ["Secondary", "#38BDF8"],
+              ["Accent", "#FDE047"],
+              ["Text", "#FAF8FC"],
+              ["Muted", "#ACA3B5"],
+              ["Border", "#36303E"],
+            ],
+          },
+        },
+      ];
+
+      function renderModeCard(theme, mode) {
+        const modeTitle = mode === "light" ? "Light Mode" : "Dark Mode";
+        const swatchesHtml = theme.swatches[mode]
+          .map(
+            ([label, hex]) => `
+            <button type="button" class="swatch" data-hex="${hex}" title="Copy ${hex}">
+              <span class="swatch-color" style="background: ${hex};"></span>
+              <span class="swatch-name">${label}</span>
+              <span class="swatch-hex">${hex}</span>
+            </button>
+          `,
+          )
+          .join("");
+
+        return `
+          <article class="preview-card ${theme.className}" data-mode="${mode}">
+            <div class="mode-label-row">
+              <span class="mode-pill">${modeTitle}</span>
+              <span style="font-size: 0.78rem; color: var(--muted);">Primary: ${theme.swatches[mode][3][1]}</span>
+            </div>
+
+            <div class="mock-nav">
+              <div class="brand">
+                <span class="brand-mark">R</span>
+                <span>RivoSnap</span>
+              </div>
+              <div class="nav-actions">
+                <button type="button" class="btn btn-ghost">Albums</button>
+                <button type="button" class="btn btn-secondary">Invite Family</button>
+                <button type="button" class="btn btn-primary">Sync Photos</button>
+              </div>
+            </div>
+
+            <div class="stats-row">
+              <div class="stat-box">
+                <div class="stat-label">Memories Saved</div>
+                <div class="stat-value">4,812</div>
+                <span class="stat-tag">+38 this week</span>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Family Groups</div>
+                <div class="stat-value">6</div>
+                <span class="stat-tag">All synced</span>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Storage</div>
+                <div class="stat-value">18.4 GB</div>
+                <span class="stat-tag">Google Photos</span>
+              </div>
+            </div>
+
+            <div class="album-grid">
+              <div class="album-card">
+                <div class="album-art art-1">
+                  <span class="album-pill">142 photos</span>
+                </div>
+                <div class="album-body">
+                  <h3 class="album-title">Sunday Picnic &amp; Park</h3>
+                  <div class="album-meta">Family Group · Today</div>
+                </div>
+              </div>
+              <div class="album-card">
+                <div class="album-art art-2">
+                  <span class="album-pill">89 photos</span>
+                </div>
+                <div class="album-body">
+                  <h3 class="album-title">Grandma's Birthday</h3>
+                  <div class="album-meta">Extended Family · Last week</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="interactive-row">
+              <input class="mock-input" type="text" value="Search family moments..." aria-label="Search preview" />
+              <div class="mock-toast">
+                <div>
+                  <strong>12 new photos</strong><br />
+                  <span>Backed up safely</span>
+                </div>
+                <button type="button" class="btn btn-ghost" style="padding: 5px 10px; font-size: 0.75rem;">View</button>
+              </div>
+            </div>
+
+            <div class="swatches">
+              ${swatchesHtml}
+            </div>
+          </article>
+        `;
+      }
+
+      const root = document.getElementById("themes-root");
+      root.innerHTML = THEMES.map(
+        (theme) => `
+          <section class="theme-section" id="${theme.id}">
+            <div class="theme-header">
+              <h2>
+                <span>${theme.name}</span>
+                <span class="theme-badge">${theme.badge}</span>
+              </h2>
+              <p class="theme-desc">${theme.desc}</p>
+            </div>
+            <div class="mode-grid">
+              ${renderModeCard(theme, "light")}
+              ${renderModeCard(theme, "dark")}
+            </div>
+          </section>
+        `,
+      ).join("");
+
+      // View mode toggle
+      document.querySelectorAll("[data-set-view]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.body.setAttribute("data-view", btn.dataset.setView);
+          document.querySelectorAll("[data-set-view]").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+        });
+      });
+
+      // Copy hex on swatch click
+      const toast = document.getElementById("copy-toast");
+      let toastTimer;
+      root.addEventListener("click", async (e) => {
+        const swatch = e.target.closest(".swatch");
+        if (!swatch) return;
+        const hex = swatch.dataset.hex;
+        try {
+          await navigator.clipboard.writeText(hex);
+          toast.textContent = `Copied ${hex}`;
+        } catch {
+          toast.textContent = hex;
+        }
+        toast.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("show"), 1400);
+      });
+    </script>
+  </body>
+</html>
