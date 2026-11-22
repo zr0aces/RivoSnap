@@ -942,7 +942,6 @@ code {
 
 /* Settings & Health */
 .settingsLedger {
-  max-width: 920px;
   display: grid;
   gap: 0;
 }
