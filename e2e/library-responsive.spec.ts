@@ -42,8 +42,10 @@ for (const [width, height] of [
     await mockApi(page, stress);
     await page.goto("/gallery");
     for (const label of [longName, "VIDEO"]) {
-      await page.getByRole("button", { name: new RegExp(label) }).click();
+      const trigger = page.getByRole("button", { name: new RegExp(label) });
+      await trigger.click();
       const dialog = page.getByRole("dialog");
+      await expect(page.locator(".mobileNav")).toBeHidden();
       const title = await box(dialog.locator(".viewerTitle"));
       const previous = await box(
         dialog.getByRole("button", { name: "Previous image" }),
@@ -70,6 +72,8 @@ for (const [width, height] of [
       expect(media.y + media.height).toBeLessThanOrEqual(foot.y + 1);
       expect(foot.y + foot.height).toBeLessThanOrEqual(height + 1);
       await close.click();
+      await expect(trigger).toBeFocused();
+      await expect(page.locator(".mobileNav")).toBeVisible();
     }
   });
 }

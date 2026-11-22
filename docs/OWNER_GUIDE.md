@@ -25,7 +25,7 @@ After sign-in, follow **Dashboard → Setup pipeline**. To revisit the checklist
 
 | When you want to… | What to do |
 |---|---|
-| Check that collection is working | Open **Dashboard** for synced, pending and failed counts and storage warnings. If work stops progressing, check **System health** in the sidebar (or open it) to verify Database, Redis, Worker and Disk. |
+| Check that collection is working | Open **Dashboard** for synced, pending and failed counts and storage warnings. If work stops progressing, check **System health** in the sidebar (or tap **Health** in the mobile top bar / **More → System health**) to verify Database, Redis, Worker and Disk. |
 | Pause or resume a group | In **LINE groups**, select **Pause collection** or **Enable collection**. Pausing stops new ingestion; it does not cancel accepted uploads or delete photos. Photos sent while paused are not backfilled. |
 | Refresh a renamed LINE group | In **LINE groups**, select **Refresh name** on the group card. RivoSnap fetches the latest group title from LINE and updates the mapped app-created Google Photos album title (`LINE - {Group Name}`). |
 | Find a photo | Use **Albums** to browse by group or **Gallery** to filter by group, date or upload status. Open a thumbnail for the larger view. Dates use Bangkok time. |

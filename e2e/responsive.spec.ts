@@ -49,10 +49,14 @@ for (const [dataset, data] of Object.entries({ normal, stress })) {
         await page.goto(route);
         await expect(page.locator(ready).first()).toBeVisible();
         if (auth === "owner") {
-          await expect(page.locator(".navBadge")).toHaveText("2");
-          await expect(
-            page.locator(".mobileHealth [title]").first(),
-          ).toBeAttached();
+          if (width > 820) {
+            await expect(page.locator(".navBadge")).toHaveText("2");
+            await expect(page.locator(".healthMiniRow").first()).toBeVisible();
+          } else {
+            await expect(page.locator("#more-nav-status")).toContainText(
+              "Upload queue: 2 pending; System health: Needs attention",
+            );
+          }
         } else {
           await expect(
             page.getByRole("button", {
@@ -103,21 +107,13 @@ for (const [dataset, data] of Object.entries({ normal, stress })) {
             scrollWidth: document.documentElement.scrollWidth,
             workspace: rect(".workspace")?.width ?? null,
             utilities: document.querySelector(".shell")
-              ? {
-                  health: bounds(
-                    mobile ? ".mobileHealth" : ".sidebarHealthHead a",
-                  ),
-                  theme: bounds(
-                    mobile
-                      ? ".mobileActions [aria-label='Dark theme']"
-                      : "header .desktopOnly",
-                  ),
-                  signOut: bounds(
-                    mobile
-                      ? ".mobileActions [aria-label='Sign out']"
-                      : ".asideFooter button",
-                  ),
-                }
+              ? mobile
+                ? { mobileNav: bounds(".mobileNav") }
+                : {
+                    health: bounds(".sidebarHealthHead a"),
+                    theme: bounds("header .desktopOnly"),
+                    signOut: bounds(".asideFooter button"),
+                  }
               : null,
             galleryCols: columns(".photos"),
             healthCols: columns(".healthGrid"),
@@ -127,8 +123,8 @@ for (const [dataset, data] of Object.entries({ normal, stress })) {
             ].map((e) => e.getBoundingClientRect().width),
             firstCardTop: rect(".photo")?.top ?? null,
             submitBottom: rect(".entry form button")?.bottom ?? null,
-            mobileHealthHeight: mobile
-              ? (rect(".mobileHealth")?.height ?? null)
+            mobileNavHeight: mobile
+              ? (rect(".mobileNav")?.height ?? null)
               : null,
             sidebarWidth: rect("aside")?.width ?? null,
             footerTop: mobile ? null : (rect(".asideFooter")?.top ?? null),
