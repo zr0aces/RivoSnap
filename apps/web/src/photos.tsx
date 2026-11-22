@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
@@ -21,6 +21,7 @@ import {
   type Settings,
 } from "./data";
 import { Title, useAction } from "./workspace";
+import "./library-responsive.css";
 
 function statusTone(status: string): string {
   if (status === "SYNCED") return "ok";
@@ -47,7 +48,7 @@ function Lightbox({
   close: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const d = ref.current;
     d?.showModal();
     return () => d?.close();
@@ -59,19 +60,20 @@ function Lightbox({
       ref={ref}
       onCancel={close}
       onKeyDown={(e) => {
+        if (e.target instanceof HTMLVideoElement) return;
         if (e.key === "ArrowLeft") set(Math.max(0, index - 1));
         if (e.key === "ArrowRight") set(Math.min(items.length - 1, index + 1));
       }}
       aria-label="Image viewer"
     >
       <div className="viewerHead">
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div className="viewerTitle">
           <b>{name({ ...p.group, lineGroupId: p.lineGroupId })}</b>
           <span className={"pill " + statusTone(p.uploadStatus)}>
             {p.uploadStatus}
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="viewerControls">
           <Button
             variant="secondary"
             aria-label="Previous image"
@@ -91,11 +93,7 @@ function Lightbox({
           >
             <ChevronRight size={16} />
           </Button>
-          <Button
-            variant="secondary"
-            aria-label="Close viewer"
-            onClick={close}
-          >
+          <Button variant="secondary" aria-label="Close viewer" onClick={close}>
             <X size={16} />
           </Button>
         </div>
@@ -134,6 +132,7 @@ function Lightbox({
 
 export function Library({ jobs = false }: { jobs?: boolean }) {
   const [sp, setParams] = useSearchParams(),
+    [filtersOpen, setFiltersOpen] = useState(false),
     [index, setIndex] = useState<number | null>(null),
     [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
   const prefs = query<Settings>("/settings"),
@@ -150,7 +149,14 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
     setIndex(null);
     setParams(p);
   };
-  const hasFilters = ["group", "status", "from", "to"].some((k) => sp.get(k));
+  const groupFilter = sp.get("group");
+  const selectedGroup = groups.data?.find((g) => g.lineGroupId === groupFilter);
+  const criteria = [
+    groupFilter && (selectedGroup ? name(selectedGroup) : groupFilter),
+    sp.get("status"),
+    sp.get("from") && "From " + sp.get("from"),
+    sp.get("to") && "Through " + sp.get("to"),
+  ].filter(Boolean);
   const d = q.data;
   const pageOffset = d ? (d.page - 1) * 36 : 0;
 
@@ -165,58 +171,79 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
             : "Photos received from your authorized LINE groups."
         }
       />
-      <div className="filters">
-        <label>
-          Group
-          <select
-            value={sp.get("group") ?? ""}
-            onChange={(e) => set("group", e.target.value)}
-          >
-            <option value="">All groups</option>
-            {groups.data?.map((g) => (
-              <option key={g.id} value={g.lineGroupId}>
-                {name(g)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Status
-          <select
-            value={sp.get("status") ?? ""}
-            onChange={(e) => set("status", e.target.value)}
-          >
-            <option value="">All states</option>
-            {states
-              .filter((s) => !jobs || s !== "SYNCED")
-              .map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-          </select>
-        </label>
-        {["from", "to"].map((k) => (
-          <label key={k}>
-            {k === "from" ? "From" : "Through"}
-            <input
-              type="date"
-              value={sp.get(k) ?? ""}
-              onChange={(e) => set(k, e.target.value)}
-            />
-          </label>
-        ))}
-        {hasFilters && (
+      <div className="filterContainer">
+        <div className="filters">
           <Button
             type="button"
-            variant="ghost"
-            onClick={() => {
-              setIndex(null);
-              setParams({});
-            }}
+            variant="secondary"
+            className="filterToggle"
+            aria-controls="library-filter-fields"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen(!filtersOpen)}
           >
-            <RotateCcw size={14} />
-            Reset
+            Filters
           </Button>
-        )}
+          {criteria.length > 0 && (
+            <span className="filterSummary">{criteria.join(" · ")}</span>
+          )}
+          <div
+            className="filterFields"
+            id="library-filter-fields"
+            data-open={filtersOpen}
+          >
+            <label>
+              Group
+              <select
+                value={sp.get("group") ?? ""}
+                onChange={(e) => set("group", e.target.value)}
+              >
+                <option value="">All groups</option>
+                {groups.data?.map((g) => (
+                  <option key={g.id} value={g.lineGroupId}>
+                    {name(g)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Status
+              <select
+                value={sp.get("status") ?? ""}
+                onChange={(e) => set("status", e.target.value)}
+              >
+                <option value="">All states</option>
+                {states
+                  .filter((s) => !jobs || s !== "SYNCED")
+                  .map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+              </select>
+            </label>
+            {["from", "to"].map((k) => (
+              <label key={k}>
+                {k === "from" ? "From" : "Through"}
+                <input
+                  type="date"
+                  value={sp.get(k) ?? ""}
+                  onChange={(e) => set(k, e.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+          {criteria.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setIndex(null);
+                setParams({});
+              }}
+            >
+              <RotateCcw size={14} />
+              Reset
+            </Button>
+          )}
+        </div>
       </div>
       <p role="status" aria-live="polite">
         {action.msg || q.error?.message}
@@ -265,7 +292,7 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
                       src={base + "/images/" + p.id + "/thumbnail?size=640"}
                       alt=""
                     />
-                    <div style={{ minWidth: 0 }}>
+                    <div className="queueSummary" style={{ minWidth: 0 }}>
                       <div
                         style={{
                           display: "flex",
@@ -283,7 +310,10 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
                         </time>
                       </div>
                       {(p.errorCode || p.lastError) && (
-                        <p style={{ margin: "6px 0 0", fontSize: "0.86rem" }}>
+                        <p
+                          className="queueIssue"
+                          style={{ margin: "6px 0 0", fontSize: "0.86rem" }}
+                        >
                           {p.errorCode && (
                             <span
                               className="mono"

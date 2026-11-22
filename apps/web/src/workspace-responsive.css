@@ -1,0 +1,57 @@
+.resolveBox .resolveAck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.albumToolbar .albumTabs {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+.albumTabs .albumTab {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.settingsLedger {
+  container: ledger / inline-size;
+}
+.settingsLedger .routeStrip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+}
+.sectionFeedback:empty {
+  margin: 0;
+}
+
+@container ledger (max-width: 640px) {
+  .settingsLedger .ledgerRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .settingsLedger .routeStrip {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: start;
+    gap: 6px;
+  }
+  .routeStrip .routeArrow {
+    transform: rotate(90deg);
+  }
+  .ledgerMain .actionSplit {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ledgerMain .actionSplit > .dangerGhost {
+    margin-top: 8px;
+  }
+}
+
+@container ledger (max-width: 400px) {
+  .ledgerMain .ruleRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

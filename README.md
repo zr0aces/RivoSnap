@@ -25,11 +25,11 @@ corepack pnpm typecheck
 corepack pnpm build
 go test -v ./...
 bash scripts/test-integration.sh
-corepack pnpm exec playwright install --with-deps chromium
+corepack pnpm exec playwright install --with-deps chromium webkit
 corepack pnpm e2e
 ```
 
-The integration script creates disposable PostgreSQL and Redis containers on loopback, applies embedded SQL migrations via `go run ./cmd/rivosnap migrate`, and tests the authenticated webhook-to-gallery path against mocked providers. This test is skipped without the script's opt-in. Playwright runs its gallery fixture locally. To exercise owner login and worker health, set E2E_URL and E2E_SETUP_KEY for a **disposable deployment only**; the test creates a fixture owner.
+The integration script creates disposable PostgreSQL and Redis containers on loopback, applies embedded SQL migrations via `go run ./cmd/rivosnap migrate`, and tests the authenticated webhook-to-gallery path against mocked providers. This test is skipped without the script's opt-in. Playwright runs the gallery and responsive fixtures locally in Chromium and WebKit. To exercise owner login and worker health, set E2E_URL and E2E_SETUP_KEY for a **disposable deployment only**; the test creates a fixture owner.
 
 For host development export server settings, point DATABASE_URL and REDIS_URL to dedicated instances, select writable cache directories, set NODE_ENV=development and APP_URL=http://localhost:5173. Run `corepack pnpm migrate`, then `corepack pnpm api`, `corepack pnpm worker`, and `corepack pnpm exec vite apps/web` in separate terminals. Use real HTTPS for live provider onboarding.
 

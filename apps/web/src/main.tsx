@@ -64,17 +64,20 @@ function SidebarHealth({ mobile = false }: { mobile?: boolean }) {
         aria-label="System health"
         title="System health"
       >
-        {entries.length ? (
-          entries.map(([k, v]) => (
-            <span
-              key={k}
-              className={"healthDot " + healthStatus(k, v)}
-              title={`${healthLabels[k] ?? k}: ${String(v)}`}
-            />
-          ))
-        ) : (
-          <span className={"healthDot " + (q.error ? "err" : "warn")} />
-        )}
+        Health
+        <span className="mobileHealthDots">
+          {entries.length ? (
+            entries.map(([k, v]) => (
+              <span
+                key={k}
+                className={"healthDot " + healthStatus(k, v)}
+                title={`${healthLabels[k] ?? k}: ${String(v)}`}
+              />
+            ))
+          ) : (
+            <span className={"healthDot " + (q.error ? "err" : "warn")} />
+          )}
+        </span>
       </Link>
     );
   }
@@ -231,11 +234,12 @@ function App() {
 
   if (auth.error)
     return (
-      <main role="alert">
-        Cannot reach the gallery. Check the API connection.
+      <main className="authState">
+        <p role="alert">Cannot reach the gallery. Check the API connection.</p>
+        <Button onClick={() => void auth.refetch()}>Try again</Button>
       </main>
     );
-  if (!auth.data) return <main>Opening library…</main>;
+  if (!auth.data) return <main className="authState" role="status">Opening library…</main>;
   if (!auth.data.authenticated) return <Login setup={auth.data.setup} />;
 
   const signOut = async () => {
@@ -329,7 +333,7 @@ function App() {
           <Route path="albums" element={<Groups albums />} />
           <Route path="settings" element={<Settings />} />
           <Route path="health" element={<Health />} />
-          <Route path="*" element={<Link to="/">Return to dashboard</Link>} />
+          <Route path="*" element={<Link className="fallbackLink" to="/">Return to dashboard</Link>} />
         </Routes>
       </main>
     </div>

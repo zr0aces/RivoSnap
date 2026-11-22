@@ -8,10 +8,13 @@ test("gallery filters and keyboard-accessible viewer", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Gallery" })).toBeVisible();
   const version = readFileSync(new URL("../VERSION", import.meta.url), "utf8").trimEnd();
   await expect(page.locator(".asideFooter").getByText(`v${version}`, { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /Photo from Family/ }).click();
+  const trigger = page.getByRole("button", { name: /Photo from Family/ });
+  await trigger.focus();
+  await trigger.press("Enter");
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
   await page
     .getByRole("combobox", { name: "Status", exact: true })
     .selectOption("FAILED");
