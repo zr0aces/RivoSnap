@@ -1,10 +1,24 @@
-import React, { useState, useEffect } from "react";
+import React, {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, NavLink, Routes, Route, Link } from "react-router-dom";
+import {
+  BrowserRouter,
+  NavLink,
+  Routes,
+  Route,
+  Link,
+  useLocation,
+} from "react-router-dom";
 import {
   QueryClient,
   QueryClientProvider,
   useQueryClient,
+  type UseQueryResult,
 } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import {
@@ -14,6 +28,9 @@ import {
   Users,
   Settings as Gear,
   CloudUpload,
+  HeartPulse,
+  MoreHorizontal,
+  X,
   LogOut,
   Moon,
   Sun,
@@ -44,6 +61,39 @@ const navSections = [
   },
 ];
 
+const compactPrimary = [
+  ["Home", "/", LayoutDashboard],
+  ["Gallery", "/gallery", Images],
+  ["Albums", "/albums", Layers],
+] as const;
+
+const secondaryDestinations = [
+  ["jobs", "/jobs", CloudUpload],
+  ["groups", "/groups", Users],
+  ["health", "/health", HeartPulse],
+  ["settings", "/settings", Gear],
+] as const;
+
+const secondaryPaths = new Set<string>(
+  secondaryDestinations.map(([, to]) => to),
+);
+
+const COMPACT_MEDIA = "(max-width: 820px)";
+
+function subscribeCompact(cb: () => void) {
+  const mql = window.matchMedia(COMPACT_MEDIA);
+  mql.addEventListener("change", cb);
+  return () => mql.removeEventListener("change", cb);
+}
+
+function useCompactShell() {
+  return useSyncExternalStore(
+    subscribeCompact,
+    () => window.matchMedia(COMPACT_MEDIA).matches,
+    () => false,
+  );
+}
+
 const healthLabels: Record<string, string> = {
   database: "Database",
   redis: "Redis",
@@ -51,8 +101,38 @@ const healthLabels: Record<string, string> = {
   diskPressure: "Disk",
 };
 
-function SidebarHealth({ mobile = false }: { mobile?: boolean }) {
-  const q = query<Record<string, string | boolean>>("/health");
+type HealthQuery = UseQueryResult<Record<string, string | boolean>>;
+
+function summarizeQueue(stats?: Stats) {
+  if (!stats) return { count: 0, text: "", active: false };
+  const { failed, pending } = stats;
+  const count = failed + pending;
+  if (count <= 0) return { count: 0, text: "", active: false };
+  const parts: string[] = [];
+  if (failed > 0) parts.push(`${failed} failed`);
+  if (pending > 0) parts.push(`${pending} pending`);
+  return { count, text: parts.join(", "), active: true };
+}
+
+function summarizeHealth(q: HealthQuery) {
+  const entries = Object.entries(q.data ?? {}).filter(
+    ([k]) => k !== "workerLastProgressAt",
+  );
+  if (q.error) return { text: "Unavailable", alarm: true };
+  if (q.isLoading && !q.data) return { text: "Checking…", alarm: false };
+  if (entries.length === 0) return { text: "Unknown", alarm: false };
+  if (entries.some(([k, v]) => healthStatus(k, v) !== "ok"))
+    return { text: "Needs attention", alarm: true };
+  return { text: "", alarm: false };
+}
+
+function SidebarHealth({
+  q,
+  mobile = false,
+}: {
+  q: HealthQuery;
+  mobile?: boolean;
+}) {
   const entries = Object.entries(q.data ?? {}).filter(
     ([k]) => k !== "workerLastProgressAt",
   );
@@ -212,25 +292,266 @@ function Login({ setup }: { setup: boolean }) {
   );
 }
 
+function CompactShellNav({
+  stats,
+  healthQuery,
+  dark,
+  onToggleDark,
+  onSignOut,
+  logoutFailed,
+  moreOpen,
+  setMoreOpen,
+  workspaceRef,
+}: {
+  stats?: Stats;
+  healthQuery: HealthQuery;
+  dark: boolean;
+  onToggleDark: () => void;
+  onSignOut: () => void;
+  logoutFailed: boolean;
+  moreOpen: boolean;
+  setMoreOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  workspaceRef: React.RefObject<HTMLElement | null>;
+}) {
+  const { pathname, key } = useLocation();
+  const barRef = useRef<HTMLElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const prevKeyRef = useRef(key);
+
+  const queueSummary = summarizeQueue(stats);
+  const healthSummary = summarizeHealth(healthQuery);
+  const hasDot = queueSummary.active || healthSummary.alarm;
+  const isSecondary = secondaryPaths.has(pathname);
+
+  const descParts: string[] = [];
+  if (queueSummary.text) descParts.push(`Upload queue: ${queueSummary.text}`);
+  if (healthSummary.text) descParts.push(`System health: ${healthSummary.text}`);
+  const moreDesc = descParts.join("; ");
+
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const sync = () => {
+      document.documentElement.style.setProperty(
+        "--mobile-nav-height",
+        `${Math.ceil(bar.getBoundingClientRect().height)}px`,
+      );
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(bar);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty("--mobile-nav-height");
+    };
+  }, []);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (moreOpen) {
+      if (!dialog.open) dialog.showModal();
+      closeBtnRef.current?.focus({ preventScroll: true });
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [moreOpen]);
+
+  useEffect(() => {
+    if (prevKeyRef.current !== key) {
+      prevKeyRef.current = key;
+      if (moreOpen) setMoreOpen(false);
+    }
+  }, [key, moreOpen, setMoreOpen]);
+
+  const closeToTrigger = () => {
+    const dialog = dialogRef.current;
+    if (dialog?.open) dialog.close();
+    setMoreOpen(false);
+    requestAnimationFrame(() => {
+      moreBtnRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  const navigateFromSheet = () => {
+    const dialog = dialogRef.current;
+    if (dialog?.open) dialog.close();
+    setMoreOpen(false);
+    requestAnimationFrame(() => {
+      workspaceRef.current?.focus({ preventScroll: true });
+    });
+  };
+
+  return (
+    <>
+      <nav ref={barRef} className="mobileNav" aria-label="Primary">
+        {compactPrimary.map(([label, to, Icon]) => (
+          <NavLink
+            key={to}
+            end={to === "/"}
+            to={to}
+            className="mobileNavItem"
+          >
+            <span className="mobileNavIconWrap">
+              <Icon size={18} aria-hidden="true" />
+            </span>
+            <span>{label}</span>
+          </NavLink>
+        ))}
+        <button
+          ref={moreBtnRef}
+          type="button"
+          className="mobileNavItem"
+          data-active={isSecondary ? "true" : undefined}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          aria-controls="more-sheet"
+          aria-describedby={moreDesc ? "more-nav-status" : undefined}
+          onClick={() => setMoreOpen(true)}
+        >
+          <span className="mobileNavIconWrap">
+            <MoreHorizontal size={18} aria-hidden="true" />
+            {hasDot && <span className="mobileNavDot" aria-hidden="true" />}
+          </span>
+          <span>More</span>
+        </button>
+      </nav>
+      {moreDesc && (
+        <span id="more-nav-status" className="srOnly">
+          {moreDesc}
+        </span>
+      )}
+      <dialog
+        ref={dialogRef}
+        id="more-sheet"
+        className="moreSheet"
+        aria-labelledby="more-sheet-title"
+        onCancel={(e) => {
+          e.preventDefault();
+          closeToTrigger();
+        }}
+        onClick={(e) => {
+          if (e.target === dialogRef.current) closeToTrigger();
+        }}
+      >
+        <div className="moreSheetInner">
+          <div className="moreSheetHead">
+            <h2 id="more-sheet-title">More</h2>
+            <button
+              ref={closeBtnRef}
+              type="button"
+              className="button ghost"
+              aria-label="Close"
+              onClick={closeToTrigger}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="moreSheetLinks">
+            {secondaryDestinations.map(([k, to, Icon]) => {
+              const rowStatus =
+                k === "jobs"
+                  ? queueSummary.text
+                  : k === "health"
+                    ? healthSummary.text
+                    : "";
+              const rowAlarm =
+                (k === "jobs" && queueSummary.active) ||
+                (k === "health" && healthSummary.alarm);
+              return (
+                <NavLink
+                  key={k}
+                  end
+                  to={to}
+                  className="moreSheetLink"
+                  onClick={navigateFromSheet}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  <span>{labels[k]}</span>
+                  {rowStatus && (
+                    <span className={"moreRowMeta" + (rowAlarm ? " alarm" : "")}>
+                      {rowStatus}
+                    </span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
+          <hr className="moreSheetDivider" />
+          <div className="moreSheetActions">
+            <Button
+              variant="secondary"
+              aria-pressed={dark}
+              onClick={onToggleDark}
+            >
+              {dark ? (
+                <Sun size={16} aria-hidden="true" />
+              ) : (
+                <Moon size={16} aria-hidden="true" />
+              )}
+              <span>Dark theme</span>
+            </Button>
+            <Button variant="ghost" onClick={onSignOut}>
+              <LogOut size={16} aria-hidden="true" />
+              <span>Sign out</span>
+            </Button>
+          </div>
+          {logoutFailed && (
+            <p className="moreSheetError" role="alert">
+              Sign-out could not be confirmed. Try again.
+            </p>
+          )}
+        </div>
+      </dialog>
+    </>
+  );
+}
+
 function App() {
   const [logoutFailed, setLogoutFailed] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [dark, theme] = useState(
     () => localStorage.getItem("gallery-theme") === "dark",
   );
+  const compact = useCompactShell();
+  const prevCompactRef = useRef(compact);
+  const asideRef = useRef<HTMLElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
     localStorage.setItem("gallery-theme", dark ? "dark" : "light");
   }, [dark]);
 
+  useEffect(() => {
+    const wasCompact = prevCompactRef.current;
+    prevCompactRef.current = compact;
+    if (wasCompact && !compact && moreOpen) {
+      setMoreOpen(false);
+      requestAnimationFrame(() => {
+        const aside = asideRef.current;
+        const target =
+          aside?.querySelector<HTMLAnchorElement>(`a[href="${pathname}"]`) ??
+          workspaceRef.current;
+        target?.focus({ preventScroll: true });
+      });
+    }
+  }, [compact, moreOpen, pathname]);
+
   const auth = query<{ setup: boolean; authenticated: boolean }>(
       "/auth/status",
     ),
-    qc = useQueryClient();
+    qc = useQueryClient(),
+    authenticated = auth.data?.authenticated === true;
   // Gated on auth: api() reloads the page on a 401, which would loop on the login screen.
-  const stats = query<Stats>(
-    "/dashboard/stats",
-    auth.data?.authenticated === true,
-  ).data;
+  const stats = query<Stats>("/dashboard/stats", authenticated).data;
+  const healthQuery = query<Record<string, string | boolean>>(
+    "/health",
+    authenticated,
+  );
 
   if (auth.error)
     return (
@@ -239,7 +560,12 @@ function App() {
         <Button onClick={() => void auth.refetch()}>Try again</Button>
       </main>
     );
-  if (!auth.data) return <main className="authState" role="status">Opening library…</main>;
+  if (!auth.data)
+    return (
+      <main className="authState" role="status">
+        Opening library…
+      </main>
+    );
   if (!auth.data.authenticated) return <Login setup={auth.data.setup} />;
 
   const signOut = async () => {
@@ -257,50 +583,45 @@ function App() {
 
   return (
     <div className="shell">
-      <aside>
+      <aside ref={asideRef}>
         <div className="asideTop">
           <Brand />
-          <div className="mobileActions">
-            <SidebarHealth mobile />
-            <Button
-              variant="ghost"
-              aria-label="Dark theme"
-              aria-pressed={dark}
-              onClick={() => theme(!dark)}
-            >
-              {dark ? <Sun size={16} /> : <Moon size={16} />}
-            </Button>
-            <Button variant="ghost" aria-label="Sign out" onClick={signOut}>
-              <LogOut size={16} />
-            </Button>
-          </div>
-        </div>
-        <nav aria-label="Primary">
-          {navSections.map((sec) => (
-            <div className="navGroup" key={sec.title}>
-              <small>{sec.title}</small>
-              {sec.items.map(([k, to, Icon]) => (
-                <NavLink end key={k} to={to}>
-                  <Icon size={17} />
-                  <span>{labels[k]}</span>
-                  {k === "jobs" && attentionCount > 0 && (
-                    <span className="navBadge">{attentionCount}</span>
-                  )}
-                </NavLink>
-              ))}
+          {compact && (
+            <div className="mobileActions">
+              <SidebarHealth q={healthQuery} mobile />
             </div>
-          ))}
-        </nav>
-        <div className="asideFooter">
-          <SidebarHealth />
-          <small className="appVersion">v{__APP_VERSION__}</small>
-          <Button variant="ghost" onClick={signOut}>
-            <LogOut size={16} />
-            Sign out
-          </Button>
+          )}
         </div>
+        {!compact && (
+          <>
+            <nav aria-label="Primary">
+              {navSections.map((sec) => (
+                <div className="navGroup" key={sec.title}>
+                  <small>{sec.title}</small>
+                  {sec.items.map(([k, to, Icon]) => (
+                    <NavLink end key={k} to={to}>
+                      <Icon size={17} />
+                      <span>{labels[k]}</span>
+                      {k === "jobs" && attentionCount > 0 && (
+                        <span className="navBadge">{attentionCount}</span>
+                      )}
+                    </NavLink>
+                  ))}
+                </div>
+              ))}
+            </nav>
+            <div className="asideFooter">
+              <SidebarHealth q={healthQuery} />
+              <small className="appVersion">v{__APP_VERSION__}</small>
+              <Button variant="ghost" onClick={signOut}>
+                <LogOut size={16} />
+                Sign out
+              </Button>
+            </div>
+          </>
+        )}
       </aside>
-      <main className="workspace">
+      <main className="workspace" ref={workspaceRef} tabIndex={-1}>
         <header>
           <span className="dot" />
           <span>Private workspace</span>
@@ -314,17 +635,21 @@ function App() {
             </span>
           )}
           <span className="tz">Asia/Bangkok</span>
-          <Button
-            className="desktopOnly"
-            variant="ghost"
-            aria-label="Dark theme"
-            aria-pressed={dark}
-            onClick={() => theme(!dark)}
-          >
-            {dark ? <Sun size={16} /> : <Moon size={16} />}
-          </Button>
+          {!compact && (
+            <Button
+              className="desktopOnly"
+              variant="ghost"
+              aria-label="Dark theme"
+              aria-pressed={dark}
+              onClick={() => theme(!dark)}
+            >
+              {dark ? <Sun size={16} /> : <Moon size={16} />}
+            </Button>
+          )}
         </header>
-        {logoutFailed && <p role="alert">Sign-out could not be confirmed. Try again.</p>}
+        {!compact && logoutFailed && (
+          <p role="alert">Sign-out could not be confirmed. Try again.</p>
+        )}
         <Routes>
           <Route index element={<Dashboard />} />
           <Route path="gallery" element={<Library key="gallery" />} />
@@ -333,9 +658,29 @@ function App() {
           <Route path="albums" element={<Groups albums />} />
           <Route path="settings" element={<Settings />} />
           <Route path="health" element={<Health />} />
-          <Route path="*" element={<Link className="fallbackLink" to="/">Return to dashboard</Link>} />
+          <Route
+            path="*"
+            element={
+              <Link className="fallbackLink" to="/">
+                Return to dashboard
+              </Link>
+            }
+          />
         </Routes>
       </main>
+      {compact && (
+        <CompactShellNav
+          stats={stats}
+          healthQuery={healthQuery}
+          dark={dark}
+          onToggleDark={() => theme(!dark)}
+          onSignOut={signOut}
+          logoutFailed={logoutFailed}
+          moreOpen={moreOpen}
+          setMoreOpen={setMoreOpen}
+          workspaceRef={workspaceRef}
+        />
+      )}
     </div>
   );
 }
