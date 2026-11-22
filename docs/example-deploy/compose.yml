@@ -65,7 +65,7 @@ services:
 
   api:
     <<: *service
-    image: "ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/rivosnap-api:latest"
+    image: "ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/rivosnap-api:${IMAGE_TAG:-latest}"
     container_name: rivosnap-api
     depends_on:
       postgres: {condition: service_healthy}
@@ -79,7 +79,7 @@ services:
 
   worker:
     <<: *service
-    image: "ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/rivosnap-worker:latest"
+    image: "ghcr.io/${GHCR_OWNER:?Set GHCR_OWNER}/rivosnap-worker:${IMAGE_TAG:-latest}"
     container_name: rivosnap-worker
     depends_on: &api_ready
       api: {condition: service_healthy}
