@@ -474,30 +474,36 @@ const googleErrors: Record<string, string> = {
   exchange: "Google connection failed. Try again.",
 };
 
+type SettingsSection = "line" | "rules" | "google" | "retention";
+
 export function Settings() {
   const [sp] = useSearchParams(),
     googleError = sp.get("google_error"),
     q = query<Prefs>("/settings"),
     google = query<{ status: string; lastError?: string }>("/google/status"),
     action = useAction(),
-    [feedbackSection, setFeedbackSection] = useState(""),
+    [feedbackSection, setFeedbackSection] = useState<SettingsSection | "">(""),
     [editingLine, setEditingLine] = useState(false);
   if (!q.data) return <p>{q.error?.message ?? "Loading settings…"}</p>;
   const d = q.data;
   const connected = google.data?.status === "CONNECTED";
   const showLineForm = !d.lineConfigured || editingLine;
 
-  function run(section: string, perform: () => Promise<unknown>, success: string) {
+  function run(
+    section: SettingsSection,
+    perform: () => Promise<unknown>,
+    success: string,
+  ) {
     setFeedbackSection(section);
     return action.run(perform, success);
   }
-  const feedback = (section: string) => (
+  const feedback = (section: SettingsSection) => (
     <p className="sectionFeedback" role="status">
       {feedbackSection === section ? action.msg : ""}
     </p>
   );
 
-  function save(e: FormEvent<HTMLFormElement>, kind: string) {
+  function save(e: FormEvent<HTMLFormElement>, kind: SettingsSection) {
     e.preventDefault();
     const form = e.currentTarget,
       data = Object.fromEntries(new FormData(form));

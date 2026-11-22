@@ -1,4 +1,9 @@
-import type { Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+
+export async function box(locator: Locator) {
+  await expect(locator).toBeVisible();
+  return (await locator.boundingBox())!;
+}
 import type { Group, Photo, Stats, Settings } from "../apps/web/src/data";
 
 const timestamp = "2026-05-01T12:00:00Z";

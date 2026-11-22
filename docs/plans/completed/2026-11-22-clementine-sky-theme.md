@@ -1,6 +1,6 @@
 # Clementine & Sky Theme (Light + Dark)
 
-**Status:** 2026-11-22 — Shipped. Updated `apps/web/src/style.css` with Clementine & Sky light/dark tokens, secondary/sunshine accents, warmer geometry, and verified `corepack pnpm typecheck` and `corepack pnpm build`.
+**Status:** 2026-11-22 — Shipped Clementine & Sky light/dark tokens (including `--accent-sun` on `.railNode:nth-child(3n)`), warmer geometry, `typecheck`, and `build`; Playwright e2e execution remains blocked on host missing `libatk-1.0.so.0` shared libraries (`playwright install-deps`).
 
 Adopt the **Clementine & Sky** theme (Option 3 from [theme-preview.html](../../theme-preview.html)) across `apps/web` for both Light and Dark modes, giving RivoSnap a warmer, more playful, family-friendly look while keeping Orange (`#FF6B2C` / `#FF8552`) as the primary brand color.
 

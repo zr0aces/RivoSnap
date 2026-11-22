@@ -1,23 +1,54 @@
 # RivoSnap
 
-A single-owner, private photo and video inbox for authorized personal LINE groups. New group images (and optional videos when enabled in Settings) are staged, checked and uploaded into one Google Photos album per group. Google Photos is the only permanent home for originals.
+A single-owner, private photo and video inbox for authorized personal LINE groups. New group images (and optional videos when enabled in Settings) are staged locally, validated, and uploaded into one Google Photos album per LINE group. Google Photos is the permanent home for originals.
 
 **First time using RivoSnap?** Follow the [step-by-step owner guide](docs/OWNER_GUIDE.md) to connect your accounts, collect your first photo, and manage groups and uploads.
 
-## Quick start
+## Overview
 
-1. Install Docker with Compose. Choose a public hostname, point its DNS record to your reverse proxy, and provision a TLS certificate for it. Set `APP_URL` to that public HTTPS origin (for example, `https://gallery.example.com`), without a path or trailing slash. Use the same URL when signing in from the LAN.
-2. Copy the supplied environment template to Compose's private environment file. Set APP_URL, the matching redirect URI, OAuth credentials and a URL-safe database password. Generate **separate** values with `openssl rand -hex 32` for SESSION_SECRET, TOKEN_ENCRYPTION_KEY and BOOTSTRAP_SECRET. Restrict file permissions to the owner.
-3. Run `docker compose up -d --build`. Forward requests for `APP_URL` to `http://127.0.0.1:${WEB_PORT:-8080}` from a same-host proxy, or to `http://<host-ip>:${WEB_PORT:-8080}` from a LAN proxy. The host port defaults to `8080` (Nginx default) and is configured via `WEB_PORT` in `.env` (for example `WEB_PORT=8068`); after changing it, run `docker compose up -d --no-deps web` and update the proxy upstream. Leave bundled Caddy disabled. See [deployment](docs/DOCKER_DEPLOYMENT.md).
-4. Open your configured `APP_URL` and claim the owner account. Follow the [owner setup steps](docs/OWNER_GUIDE.md#set-up-your-first-group) to save the LINE credentials **before** verifying the webhook, authorize Google Photos, and confirm your first synced image.
+- **Pipeline**: LINE webhook events → transactional outbox & Redis queue → local staging & thumbnail generation → Google Photos album upload.
+- **Reliability**: Channel/message deduplication, uncertain Google write reconciliation, disk-pressure guards, and no silent deletion of unuploaded originals.
+- **Media support**: Validated JPEG/PNG/WebP/GIF images and optional MP4/MOV/WebM videos (`collectVideos` toggle in Settings, off by default).
+- **Responsive web UI**: Desktop, tablet, and mobile-friendly workspace with **Clementine & Sky** light/dark themes ([theme preview](docs/theme-preview.html)).
+
+## Technology stack
+
+| Layer | Technologies |
+| --- | --- |
+| **Backend (`api` & `worker`)** | Go 1.26 (`cmd/rivosnap`, `internal/*`), `pgx/v5`, `go-redis/v9`, `golang.org/x/crypto`, `golang.org/x/image`, `ffmpeg` / `ffprobe` (video processing) |
+| **Database & Queue** | PostgreSQL 18.7 (embedded SQL migrations, transactional outbox), Redis 7.4 (AOF persistence, `noeviction`) |
+| **Frontend (`apps/web`)** | React 19, TypeScript 5.9, Vite 7, Tailwind CSS 4, React Router 7, TanStack Query 5, React Hook Form 7, Lucide icons |
+| **Web & Edge** | Nginx Unprivileged 1.30 (Alpine), optional Caddy TLS edge (`--profile edge`), Docker Compose |
+| **Testing & Tooling** | Go `testing`, disposable Docker integration suite, Playwright 1.65 (Chromium & WebKit), pnpm 10 via Corepack, Node 24 LTS |
+
+## How to use
+
+### 1. Deploy with Docker Compose
+
+1. Install Docker with Compose. Choose a public HTTPS hostname (for example, `https://gallery.example.com`), point DNS to your reverse proxy, and provision TLS. Set `APP_URL` to that origin without a path or trailing slash.
+2. Copy `.env.example` to `.env`, set `APP_URL`, `GOOGLE_REDIRECT_URI`, OAuth credentials, and a URL-safe `POSTGRES_PASSWORD`. Generate **separate** 32-byte secrets with `openssl rand -hex 32` for `SESSION_SECRET`, `TOKEN_ENCRYPTION_KEY`, and `BOOTSTRAP_SECRET`. Restrict `.env` permissions (`chmod 600 .env`).
+3. Start the stack:
+   ```sh
+   docker compose up -d --build
+   ```
+   Forward `APP_URL` traffic to `http://127.0.0.1:${WEB_PORT:-8080}` (same-host proxy) or `http://<host-ip>:${WEB_PORT:-8080}` (LAN proxy). Default `WEB_PORT` is `8080`. See [Docker deployment](docs/DOCKER_DEPLOYMENT.md).
+
+### 2. Claim & configure
+
+1. Open `APP_URL` and claim the owner account using `BOOTSTRAP_SECRET`.
+2. In **Settings**, save your LINE Messaging API credentials **before** verifying the webhook in the LINE Developers Console.
+3. Connect Google Photos via OAuth.
+4. Enable the LINE groups you want to collect from, optionally toggle **Collect videos**, and monitor sync jobs in **Dashboard**, **Gallery**, and **Albums**.
+
+See [Owner Guide](docs/OWNER_GUIDE.md), [LINE setup](docs/LINE_SETUP.md), and [Google Cloud setup](docs/GOOGLE_CLOUD_SETUP.md) for detailed instructions.
 
 ## Development and tests
 
 Start with the [plan index](docs/plans/README.md) to find or propose work. Claude Code, Codex, and Antigravity share the [AI tool workflow](AGENTS.md#ai-tool-workflow).
 
-The [versioning policy](AGENTS.md#versioning) specifies Bangkok-calendar CalVer for application releases. Root `VERSION` is authoritative. Validate it with `node scripts/sync-version.mjs --check`. To prepare the next version, run `node scripts/release.mjs`; this does not publish, tag or build. Use `node scripts/release.mjs --help` for explicit version, build and local tag options. The version in the OpenAPI document identifies the API contract, not an application release.
+The [versioning policy](AGENTS.md#versioning) specifies Bangkok-calendar CalVer (`YYYY.M.N`) in root `VERSION`. Validate with `node scripts/sync-version.mjs --check`, or prepare a release with `node scripts/release.mjs` (`--help` for build/tag options).
 
-Go 1.26+ (for the `api` and `worker` services in `cmd/rivosnap` and `internal/*`) and Node 24 LTS + pnpm 10 via Corepack (for `apps/web`, E2E tests, and version scripts). Run from the repository root:
+Run from the repository root (Go 1.26+ and Node 24 LTS + pnpm 10 via Corepack):
 
 ```sh
 corepack pnpm install --frozen-lockfile
@@ -29,17 +60,19 @@ corepack pnpm exec playwright install --with-deps chromium webkit
 corepack pnpm e2e
 ```
 
-The integration script creates disposable PostgreSQL and Redis containers on loopback, applies embedded SQL migrations via `go run ./cmd/rivosnap migrate`, and tests the authenticated webhook-to-gallery path against mocked providers. This test is skipped without the script's opt-in. Playwright runs the gallery and responsive fixtures locally in Chromium and WebKit. To exercise owner login and worker health, set E2E_URL and E2E_SETUP_KEY for a **disposable deployment only**; the test creates a fixture owner.
-
-For host development export server settings, point DATABASE_URL and REDIS_URL to dedicated instances, select writable cache directories, set NODE_ENV=development and APP_URL=http://localhost:5173. Run `corepack pnpm migrate`, then `corepack pnpm api`, `corepack pnpm worker`, and `corepack pnpm exec vite apps/web` in separate terminals. Use real HTTPS for live provider onboarding.
+- `scripts/test-integration.sh` spins up disposable PostgreSQL and Redis containers on loopback, runs embedded SQL migrations via `go run ./cmd/rivosnap migrate`, and tests the webhook-to-gallery flow against mocked providers.
+- Playwright runs gallery and responsive fixtures locally in Chromium and WebKit. To test owner login and worker health against a **disposable deployment only**, set `E2E_URL` and `E2E_SETUP_KEY`.
+- For host development, export server settings pointing `DATABASE_URL` and `REDIS_URL` to dedicated instances, set `NODE_ENV=development` and `APP_URL=http://localhost:5173`, and run `corepack pnpm migrate`, `corepack pnpm api`, `corepack pnpm worker`, and `corepack pnpm exec vite apps/web` in separate terminals.
 
 ## Handbook
 
+- [Owner guide](docs/OWNER_GUIDE.md)
 - [Architecture and retention](docs/ARCHITECTURE.md)
 - [LINE setup](docs/LINE_SETUP.md)
 - [Google Cloud setup](docs/GOOGLE_CLOUD_SETUP.md) and [OAuth restrictions](docs/GOOGLE_PHOTOS_OAUTH.md)
 - [Docker, proxy, backup and restore](docs/DOCKER_DEPLOYMENT.md)
 - [Security and privacy](docs/SECURITY.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Theme preview](docs/theme-preview.html)
 
-Signed-in API documentation: **/api/openapi.json**. Display timezone: Asia/Bangkok. Live LINE delivery, public TLS and Google consent require owner configuration and testing.
+Signed-in API documentation: **/api/openapi.json**. Display timezone: `Asia/Bangkok`.

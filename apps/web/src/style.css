@@ -408,6 +408,10 @@ time {
   color: var(--secondary);
 }
 
+.railNode:nth-child(3n) {
+  border-top-color: var(--accent-sun);
+}
+
 .railNode strong {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

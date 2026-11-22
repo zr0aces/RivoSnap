@@ -1,10 +1,6 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { longName, mockApi, normal, stress } from "./fixtures";
+import { box, longName, mockApi, normal, stress } from "./fixtures";
 
-const box = async (el: Locator) => {
-  await expect(el).toBeVisible();
-  return (await el.boundingBox())!;
-};
 async function fits(el: Locator, parent: Locator) {
   const [item, card] = await Promise.all([box(el), box(parent)]);
   expect(item.x).toBeGreaterThanOrEqual(card.x - 1);
@@ -92,9 +88,9 @@ for (const width of [320, 821]) {
       await fits(control, google);
       await control.click({ trial: true });
     }
-    const a = await box(reconnect),
-      d = await box(disconnect);
-    expect(d.y).toBeGreaterThan(a.y + a.height);
+    const reconnectBox = await box(reconnect),
+      disconnectBox = await box(disconnect);
+    expect(disconnectBox.y).toBeGreaterThan(reconnectBox.y + reconnectBox.height);
     await validate.click();
     await expect(google.getByRole("status")).toHaveText(
       "Validation unavailable.",

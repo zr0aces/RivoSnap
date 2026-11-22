@@ -1,5 +1,5 @@
-import { test, expect, type Locator } from "@playwright/test";
-import { longName, mockApi, stress } from "./fixtures";
+import { test, expect } from "@playwright/test";
+import { box, longName, mockApi, stress } from "./fixtures";
 
 for (const surface of ["gallery", "jobs"]) {
   test(`phone ${surface} filters survive reload and reset while collapsed`, async ({
@@ -29,11 +29,6 @@ for (const surface of ["gallery", "jobs"]) {
     await expect(page).toHaveURL(new RegExp("/" + surface + "$"));
     await expect(page.locator(".filterSummary")).toHaveCount(0);
   });
-}
-
-async function box(locator: Locator) {
-  await expect(locator).toBeVisible();
-  return (await locator.boundingBox())!;
 }
 
 for (const [width, height] of [
