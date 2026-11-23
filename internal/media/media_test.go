@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"golang.org/x/image/webp"
 	"image"
 	"image/color"
@@ -12,7 +13,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"rivosnap/internal/config"
+	"rivosnap/internal/model"
 	"testing"
+	"time"
 )
 
 func TestVideoDimensionLimit(t *testing.T) {
@@ -154,5 +157,102 @@ func TestStageDeletesPartOnOversize(t *testing.T) {
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("leftover files: %v, %v", entries, err)
+	}
+}
+
+// probeStub puts an ffprobe stub with script first in PATH for this test.
+func probeStub(t *testing.T, script string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ffprobe"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// Tool and filesystem faults are transient (AUD3-007); a file that makes ffprobe fail or hang is not.
+func TestInspectVideoToolFaults(t *testing.T) {
+	video := filepath.Join(t.TempDir(), "clip.mp4")
+	if err := os.WriteFile(video, []byte("not really a video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	defaultTimeout := probeTimeout
+	t.Cleanup(func() { probeTimeout = defaultTimeout })
+
+	cases := []struct {
+		name        string
+		script      string
+		absent      bool          // no ffprobe anywhere in PATH
+		timeout     time.Duration // probeTimeout override, 0 keeps the default
+		cancelAfter time.Duration // cancel the parent context after this long, 0 keeps it live
+		wantCode    string
+	}{
+		{name: "killed with SIGKILL", script: "#!/bin/sh\nkill -9 $$\n", wantCode: "MEDIA_TOOL"},
+		{name: "binary absent", absent: true, wantCode: "MEDIA_TOOL"},
+		{name: "parent cancelled while running", script: "#!/bin/sh\nexec sleep 5\n", cancelAfter: 100 * time.Millisecond, wantCode: "MEDIA_TOOL"},
+		{name: "exit 1 on garbage", script: "#!/bin/sh\nexit 1\n", wantCode: "UNSUPPORTED_VIDEO"},
+		{name: "SIGSEGV", script: "#!/bin/sh\nkill -SEGV $$\n", wantCode: "UNSUPPORTED_VIDEO"},
+		{name: "SIGABRT", script: "#!/bin/sh\nkill -ABRT $$\n", wantCode: "UNSUPPORTED_VIDEO"},
+		{name: "inner timeout with live parent", script: "#!/bin/sh\nexec sleep 5\n", timeout: 200 * time.Millisecond, wantCode: "UNSUPPORTED_VIDEO"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			probeTimeout = defaultTimeout
+			if tc.timeout > 0 {
+				probeTimeout = tc.timeout
+			}
+			if tc.absent {
+				t.Setenv("PATH", t.TempDir())
+			} else {
+				probeStub(t, tc.script)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancelAfter > 0 {
+				time.AfterFunc(tc.cancelAfter, cancel)
+			}
+
+			_, err := InspectVideo(ctx, video)
+			var f *model.Fault
+			if !errors.As(err, &f) {
+				t.Fatalf("expected a fault, got %v", err)
+			}
+			if f.Code != tc.wantCode {
+				t.Fatalf("expected %s, got %s (%s)", tc.wantCode, f.Code, f.Message)
+			}
+			if wantTransient := tc.wantCode == "MEDIA_TOOL"; f.Transient != wantTransient {
+				t.Fatalf("%s: transient = %v, want %v", f.Code, f.Transient, wantTransient)
+			}
+		})
+	}
+}
+
+// A file that cannot be opened is an environment fault, not a bad image (AUD3-007).
+func TestInspectOpenErrorIsNotUnsupported(t *testing.T) {
+	var f *model.Fault
+	// A path below a regular file fails stat with ENOTDIR, not ErrNotExist, and works as root too.
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectVideo(context.Background(), filepath.Join(blocker, "clip.mp4")); err == nil || errors.As(err, &f) {
+		t.Fatalf("an unreadable video path must yield a non-fault error, got %v", err)
+	}
+	if _, err := InspectVideo(context.Background(), filepath.Join(t.TempDir(), "gone.mp4")); !errors.As(err, &f) || f.Code != "UNSUPPORTED_VIDEO" {
+		t.Fatalf("a missing video must stay UNSUPPORTED_VIDEO, got %v", err)
+	}
+	if _, err := Inspect(t.TempDir()); err == nil || errors.As(err, &f) {
+		t.Fatalf("a directory must yield a non-fault error, got %v", err)
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads unreadable files")
+	}
+	unreadable := filepath.Join(t.TempDir(), "locked.jpg")
+	if err := os.WriteFile(unreadable, []byte("\xff\xd8\xff"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Inspect(unreadable); err == nil || errors.As(err, &f) {
+		t.Fatalf("an unreadable file must yield a non-fault error, got %v", err)
 	}
 }

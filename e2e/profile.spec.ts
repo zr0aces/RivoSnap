@@ -158,3 +158,87 @@ test("exhausted sign-in attempt returns to sign-in choices", async ({
   ).toBeVisible();
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
 });
+
+test("change form moves focus in and returns it to the trigger", async ({ page }) => {
+  await mockApi(page, normal);
+  await page.route("**/api/v1/profile", (route) =>
+    route.fulfill({
+      json: { email: "owner@example.org", passkeys: {}, totp: false, recoveryRemaining: 0 },
+    }),
+  );
+  await page.route("**/api/v1/auth/cancel", (route) => route.fulfill({ json: { ok: true } }));
+  await page.goto("/profile");
+  const trigger = page.getByRole("button", { name: "Enable authenticator" });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("heading", { name: "Enable authenticator", exact: true }),
+  ).toBeFocused();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Enable authenticator" })).toBeFocused();
+});
+
+test("Back to sign-in choices focuses the email field", async ({ page }) => {
+  await mockApi(page, normal, "login");
+  await page.route("**/api/v1/auth/login", (route) =>
+    route.fulfill({ json: { mfaRequired: true } }),
+  );
+  await page.route("**/api/v1/auth/cancel", (route) => route.fulfill({ json: { ok: true } }));
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("owner@example.org");
+  await page.getByLabel("Password", { exact: true }).fill("long-fixture-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByLabel("Authenticator or recovery code")).toBeVisible();
+  await page.getByRole("button", { name: "Back to sign-in choices" }).click();
+  await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
+});
+
+// A 1x1 GIF stands in for the authenticator QR code.
+const qrImage = "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+
+test("change preview keeps its QR and codes through a 400 and returns to the start on 429", async ({ page }) => {
+  await mockApi(page, normal);
+  await page.route("**/api/v1/profile", (route) =>
+    route.fulfill({
+      json: { email: "owner@example.org", passkeys: {}, totp: false, recoveryRemaining: 0 },
+    }),
+  );
+  await page.route("**/api/v1/profile/start", (route) =>
+    route.fulfill({
+      json: {
+        confirmation: "fixture-confirmation",
+        qr: qrImage,
+        secret: "JBSWY3DPEHPK3PXP",
+        codes: ["AAAA-1111", "BBBB-2222"],
+      },
+    }),
+  );
+  let finishStatus = 400;
+  await page.route("**/api/v1/profile/finish", (route) =>
+    route.fulfill({
+      status: finishStatus,
+      json:
+        finishStatus === 400
+          ? { error: "Verification failed. Check your details and try again." }
+          : { error: "Too many attempts. Try again later." },
+    }),
+  );
+  await page.goto("/profile");
+  await page.getByRole("button", { name: "Enable authenticator" }).click();
+  await page.getByLabel("Current password").fill("long-fixture-password");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByAltText("Scan this QR code with your authenticator app")).toBeVisible();
+  await expect(page.getByText("AAAA-1111")).toBeVisible();
+
+  await page.getByLabel("First authenticator code").fill("000000");
+  await page.getByLabel("I saved these codes").check();
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  await expect(page.getByRole("alert")).toContainText("Verification failed. Check your details and try again.");
+  await expect(page.getByAltText("Scan this QR code with your authenticator app")).toBeVisible();
+
+  finishStatus = 429;
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  await expect(page.getByRole("alert")).toContainText("Too many attempts. Try again later.");
+  await expect(page.getByLabel("Current password")).toBeVisible();
+  await expect(page.getByAltText("Scan this QR code with your authenticator app")).toHaveCount(0);
+});

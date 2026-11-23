@@ -108,11 +108,21 @@ func (p *Processor) ResolveAlbum(ctx context.Context, g LineGroupRow, token stri
 			0,
 		)
 	}
-	albumID, err := google.CreateAlbum(ctx, google.Title(g.DisplayName, g.LineGroupID), token)
+	// Shutdown after the claim: release it before any Google write starts.
+	if err := ctx.Err(); err != nil {
+		releaseCtx, cancel := persistCtx(ctx)
+		defer cancel()
+		_, _ = p.DB.Pool.Exec(releaseCtx, `UPDATE "LineGroup" SET "albumCreating" = false, "updatedAt" = NOW() WHERE id = $1`, g.ID)
+		return "", err
+	}
+	// Once the claim is taken, a shutdown must not abandon the create: its outcome has to be recorded.
+	albumID, err := google.CreateAlbum(context.WithoutCancel(ctx), google.Title(g.DisplayName, g.LineGroupID), token)
 	if err != nil {
 		var f *model.Fault
 		if errors.As(err, &f) && (!f.Transient || f.Code == "GOOGLE_RATE_LIMIT") {
-			_, _ = p.DB.Pool.Exec(ctx, `UPDATE "LineGroup" SET "albumCreating" = false, "updatedAt" = NOW() WHERE id = $1`, g.ID)
+			releaseCtx, cancel := persistCtx(ctx)
+			defer cancel()
+			_, _ = p.DB.Pool.Exec(releaseCtx, `UPDATE "LineGroup" SET "albumCreating" = false, "updatedAt" = NOW() WHERE id = $1`, g.ID)
 			return "", err
 		}
 		return "", model.NewFault(
@@ -122,14 +132,22 @@ func (p *Processor) ResolveAlbum(ctx context.Context, g LineGroupRow, token stri
 			0,
 		)
 	}
+	recordCtx, cancel := persistCtx(ctx)
+	defer cancel()
 	if _, err := p.DB.Pool.Exec(
-		ctx,
+		recordCtx,
 		`UPDATE "LineGroup" SET "googleAlbumId" = $1, "albumCreating" = false, "updatedAt" = NOW() WHERE id = $2`,
 		albumID, g.ID,
 	); err != nil {
 		return "", err
 	}
 	return albumID, nil
+}
+
+// persistCtx detaches the writes that close a step from a shutdown signal, bounded at 10 s.
+// A cancelled step leaves its earlier state in place, so it resumes from there on restart.
+func persistCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 }
 
 func (p *Processor) loadImage(ctx context.Context, id string) (ImageRow, error) {
@@ -217,6 +235,23 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 	lookupOnly := i.UploadStatus == model.StateCreatingMedia || i.UploadStatus == model.StateNeedsReview
 	var count int
 	if err := p.DB.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM "UploadAttempt" WHERE "imageId" = $1`, id).Scan(&count); err != nil {
+		return err
+	}
+	// Retry budget: attempts after the last FAILED row, plus this one. Owner Retry and album
+	// repair restart only FAILED items, and every FAILED transition writes a FAILED attempt row,
+	// so a manual restart begins a fresh budget. Interrupted (shutdown) attempts do not count.
+	var budget int
+	if err := p.DB.Pool.QueryRow(
+		ctx,
+		`WITH cycle AS (
+		   SELECT COALESCE(MAX("attemptNumber") FILTER (WHERE "status" = 'FAILED'), 0) AS last
+		   FROM "UploadAttempt" WHERE "imageId" = $1
+		 )
+		 SELECT COUNT(*) FILTER (WHERE a."status" <> 'INTERRUPTED' AND a."attemptNumber" > c.last) + 1
+		 FROM "UploadAttempt" a CROSS JOIN cycle c
+		 WHERE a."imageId" = $1`,
+		id,
+	).Scan(&budget); err != nil {
 		return err
 	}
 	// Attempts never completed belong to runs that were killed (OOM) or cancelled; cap the loop.
@@ -360,8 +395,9 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 			}
 		} else {
 			if i.UploadStatus == model.StateReceived || i.UploadStatus == model.StateRetryPending {
+				// Skip inspection only when the original and its recorded checksum and MIME type are present.
 				next := model.StateDownloadPending
-				if i.StagingPath != nil && *i.StagingPath != "" {
+				if i.StagingPath != nil && *i.StagingPath != "" && i.Sha256 != nil && i.MimeType != nil {
 					next = model.StateUploadPending
 				}
 				if err := moveState(next); err != nil {
@@ -422,25 +458,27 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 				if err := moveStaged(staged); err != nil {
 					return err
 				}
-				tx, err := p.DB.Pool.Begin(ctx)
+				pctx, cancel := persistCtx(ctx)
+				defer cancel()
+				tx, err := p.DB.Pool.Begin(pctx)
 				if err != nil {
 					return err
 				}
-				defer tx.Rollback(ctx)
-				if _, err := tx.Exec(ctx, `UPDATE "UploadAttempt" SET "status" = 'STAGED', "completedAt" = NOW() WHERE id = $1`, attemptID); err != nil {
+				defer tx.Rollback(pctx)
+				if _, err := tx.Exec(pctx, `UPDATE "UploadAttempt" SET "status" = 'STAGED', "completedAt" = NOW() WHERE id = $1`, attemptID); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(
-					ctx,
+					pctx,
 					`INSERT INTO "OutboxEvent" ("id", "eventType", "aggregateId", "payload", "createdAt", "availableAt") VALUES ($1, 'UPLOAD', $2, '{}'::jsonb, NOW(), NOW())`,
 					uuid.NewString(), id,
 				); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(ctx, `DELETE FROM "OutboxEvent" WHERE id = $1`, outboxID); err != nil {
+				if _, err := tx.Exec(pctx, `DELETE FROM "OutboxEvent" WHERE id = $1`, outboxID); err != nil {
 					return err
 				}
-				return tx.Commit(ctx)
+				return tx.Commit(pctx)
 			}
 
 			if i.UploadStatus == model.StateStaged || i.UploadStatus == model.StateUploadPending || i.UploadStatus == model.StateUploading {
@@ -449,16 +487,25 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 					mediaKind = "VIDEO"
 				}
 				if i.ThumbnailPath == nil || *i.ThumbnailPath == "" {
+					// Previews are best effort: the API regenerates them on demand, so a failure only degrades the gallery.
+					previewsOK := true
 					for _, sz := range []int{320, 640} {
 						if _, err := p.Store.Thumbnail(ctx, id, sz, mediaKind); err != nil {
-							return err
+							if ctx.Err() != nil {
+								return err
+							}
+							log.Printf("Preview generation failed; upload continues image=%s error=%T", id, err)
+							previewsOK = false
+							break
 						}
 					}
-					tpath, _ := p.Store.PathFor(id, 320)
-					if _, err := p.DB.Pool.Exec(ctx, `UPDATE "Image" SET "thumbnailPath" = $1, "updatedAt" = NOW() WHERE id = $2`, tpath, id); err != nil {
-						return err
+					if previewsOK {
+						tpath, _ := p.Store.PathFor(id, 320)
+						if _, err := p.DB.Pool.Exec(ctx, `UPDATE "Image" SET "thumbnailPath" = $1, "updatedAt" = NOW() WHERE id = $2`, tpath, id); err != nil {
+							return err
+						}
+						i.ThumbnailPath = &tpath
 					}
-					i.ThumbnailPath = &tpath
 				}
 				if i.UploadStatus == model.StateStaged {
 					if err := moveState(model.StateUploadPending); err != nil {
@@ -535,25 +582,27 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 			}
 		}
 
-		tx, err := p.DB.Pool.Begin(ctx)
+		pctx, cancel := persistCtx(ctx)
+		defer cancel()
+		tx, err := p.DB.Pool.Begin(pctx)
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback(ctx)
-		if _, err := tx.Exec(ctx, `UPDATE "UploadAttempt" SET "status" = 'SYNCED', "completedAt" = NOW() WHERE id = $1`, attemptID); err != nil {
+		defer tx.Rollback(pctx)
+		if _, err := tx.Exec(pctx, `UPDATE "UploadAttempt" SET "status" = 'SYNCED', "completedAt" = NOW() WHERE id = $1`, attemptID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(
-			ctx,
+			pctx,
 			`INSERT INTO "AuditLog" ("id", "action", "targetType", "targetId", "metadata", "createdAt") VALUES ($1, 'Photo synced', 'image', $2, '{}'::jsonb, NOW())`,
 			uuid.NewString(), id,
 		); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM "OutboxEvent" WHERE id = $1`, outboxID); err != nil {
+		if _, err := tx.Exec(pctx, `DELETE FROM "OutboxEvent" WHERE id = $1`, outboxID); err != nil {
 			return err
 		}
-		return tx.Commit(ctx)
+		return tx.Commit(pctx)
 	}
 
 	var runErr error
@@ -571,6 +620,20 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 	if runErr == nil {
 		return nil
 	}
+	// Shutdown stops the step, not the item: record the attempt as interrupted and keep the state
+	// and outbox row, so the next run resumes from the same step without repeating a Google write.
+	if !crashLoop && ctx.Err() != nil {
+		iCtx, cancel := persistCtx(ctx)
+		defer cancel()
+		if _, err := p.DB.Pool.Exec(
+			iCtx,
+			`UPDATE "UploadAttempt" SET "status" = 'INTERRUPTED', "completedAt" = NOW() WHERE id = $1`,
+			attemptID,
+		); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	var f *model.Fault
 	if !errors.As(runErr, &f) {
@@ -585,7 +648,7 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 	var next model.State
 	if uncertain {
 		next = model.StateNeedsReview
-	} else if f.Transient && n < 8 {
+	} else if f.Transient && budget < model.MaxAutoAttempts {
 		next = model.StateRetryPending
 	} else if slices.Contains(unrecCodes, f.Code) {
 		next = model.StateUnrecoverable
@@ -602,13 +665,15 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 		}
 	}
 
-	tx, err := p.DB.Pool.Begin(ctx)
+	pctx, cancel := persistCtx(ctx)
+	defer cancel()
+	tx, err := p.DB.Pool.Begin(pctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(pctx)
 	if _, err := tx.Exec(
-		ctx,
+		pctx,
 		`UPDATE "Image"
 		 SET "uploadStatus" = $1::"UploadState", "lastError" = $2, "errorCode" = $3,
 		     "stagingPath" = COALESCE($6, "stagingPath"), "updatedAt" = NOW()
@@ -618,7 +683,7 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 		return err
 	}
 	if _, err := tx.Exec(
-		ctx,
+		pctx,
 		`UPDATE "UploadAttempt"
 		 SET "status" = $1, "errorCode" = $2, "errorMessage" = $3, "completedAt" = NOW()
 		 WHERE id = $4`,
@@ -627,9 +692,9 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 		return err
 	}
 	if next == model.StateRetryPending {
-		avail := time.Now().UTC().Add(time.Duration(model.Backoff(n, f.Delay)) * time.Millisecond)
+		avail := time.Now().UTC().Add(time.Duration(model.Backoff(budget, f.Delay)) * time.Millisecond)
 		if _, err := tx.Exec(
-			ctx,
+			pctx,
 			`INSERT INTO "OutboxEvent" ("id", "eventType", "aggregateId", "payload", "createdAt", "availableAt")
 			 VALUES ($1, 'PROCESS', $2, '{}'::jsonb, NOW(), $3)`,
 			uuid.NewString(), id, avail,
@@ -637,10 +702,10 @@ func (p *Processor) ProcessEvent(ctx context.Context, outboxID string) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM "OutboxEvent" WHERE id = $1`, outboxID); err != nil {
+	if _, err := tx.Exec(pctx, `DELETE FROM "OutboxEvent" WHERE id = $1`, outboxID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return tx.Commit(pctx)
 }
 
 func (p *Processor) removeOriginal(id string) error {
@@ -735,6 +800,10 @@ func (p *Processor) Cleanup(ctx context.Context, now time.Time) error {
 // further claims fail; a successor can recover unacknowledged rows after a minute.
 func (p *Processor) dispatch(ctx context.Context, conn *pgx.Conn) error {
 	for range 100 {
+		// Shutdown: claim nothing more; unclaimed rows stay for the next worker after the lease.
+		if ctx.Err() != nil {
+			return nil
+		}
 		var id string
 		err := conn.QueryRow(ctx, `UPDATE "OutboxEvent" SET "publishedAt" = NOW()
         WHERE id = (SELECT id FROM "OutboxEvent" WHERE "availableAt" <= NOW()
@@ -745,9 +814,17 @@ func (p *Processor) dispatch(ctx context.Context, conn *pgx.Conn) error {
 			return nil
 		}
 		if err != nil {
+			if ctx.Err() != nil {
+				// Log the type only: the claim error can carry driver detail.
+				log.Printf("Worker shutdown during outbox claim; error type=%T", err)
+				return nil
+			}
 			return err
 		}
 		if err := p.ProcessEvent(ctx, id); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 		if p.Redis != nil {

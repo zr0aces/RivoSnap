@@ -4,12 +4,13 @@ Add a link under **Active** when a plan is created; move it to **Completed** whe
 
 ## Active
 
-- [Owner Profile: authenticator app and passkeys](2026-11-23-owner-profile-mfa.md) — Implemented and Chromium-tested; the physical-device HTTPS smoke check and WebKit e2e remain before release.
+- [Audit 3 Remediation (AUD3-001 to AUD3-031)](2026-11-23-audit3-remediation.md) — Implemented and uncommitted (35 tasks, two fix rounds, Chromium e2e and Go gates green); stays active until the PR merges and CI passes. WebKit, the first CI run of the new jobs and a real SIGTERM check were not run.
+- [Owner Profile: authenticator app and passkeys](2026-11-23-owner-profile-mfa.md) — Merged in PR #19, unreleased; the physical-device HTTPS smoke check and WebKit e2e remain before release.
 - [Owner MFA review fixes](2026-11-23-owner-mfa-review-fixes.md) — Review findings fixed (failure ordering, test coverage, scope cleanup) and gates green in Chromium; WebKit e2e and the originating plan's smoke check are pending.
-- [Mobile bottom navigation and More sheet](2026-11-22-mobile-bottom-navigation.md) — Keep family browsing one tap away and move management actions into an accessible mobile sheet.
 
 ## Completed
 
+- [Mobile bottom navigation and More sheet](completed/2026-11-22-mobile-bottom-navigation.md) — Compact bottom bar and accessible More sheet; shipped in PR #18 (`4697eec`), contained in `v2026.11.6` and `v2026.11.7`.
 - [Application-wide responsive design](completed/2026-11-22-responsive-design.md) — Responsive workspace and page interactions verified at ten viewport sizes in Chromium and WebKit.
 - [Clementine & Sky Theme (Light + Dark)](completed/2026-11-22-clementine-sky-theme.md) — Adopt warm Clementine & Sky light/dark palette and friendlier geometry across `apps/web`.
 - [Audit 2 Remediation (AUD2-001 to AUD2-012)](completed/2026-11-21-audit2-remediation.md) — Fix all findings from the 2026-11-21 audit, starting with the UTC session-timezone ingestion blackout.

@@ -169,16 +169,19 @@ func detectImageFormat(header []byte) string {
 func Inspect(filePath string) (MediaInfo, error) {
 	st, err := os.Stat(filePath)
 	if err != nil {
-		return MediaInfo{}, model.NewFault("UNSUPPORTED_IMAGE", "Invalid or oversized image.", false, 0)
+		return MediaInfo{}, missingOrRaw(err)
 	}
 	f, err := os.Open(filePath)
 	if err != nil {
-		return MediaInfo{}, model.NewFault("UNSUPPORTED_IMAGE", "Invalid or oversized image.", false, 0)
+		return MediaInfo{}, missingOrRaw(err)
 	}
 	defer f.Close()
 
 	header := make([]byte, 16)
-	n, _ := io.ReadFull(f, header)
+	n, err := io.ReadFull(f, header)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return MediaInfo{}, err
+	}
 	mime := detectImageFormat(header[:n])
 	if mime == "" {
 		return MediaInfo{}, model.NewFault("UNSUPPORTED_IMAGE", "Invalid or oversized image.", false, 0)
@@ -212,12 +215,20 @@ func Inspect(filePath string) (MediaInfo, error) {
 	}, nil
 }
 
+// probeTimeout bounds one ffprobe run. A file that keeps ffprobe busy this long is unsupported,
+// so it is never retried as a tool fault.
+var probeTimeout = 30 * time.Second
+
 func InspectVideo(ctx context.Context, filePath string) (MediaInfo, error) {
 	st, err := os.Stat(filePath)
 	if err != nil {
-		return MediaInfo{}, model.NewFault("UNSUPPORTED_VIDEO", "Invalid or unreadable video.", false, 0)
+		// A missing file is unsupported; any other stat failure is an environment fault (AUD3-007).
+		if errors.Is(err, os.ErrNotExist) {
+			return MediaInfo{}, model.NewFault("UNSUPPORTED_VIDEO", "Invalid or unreadable video.", false, 0)
+		}
+		return MediaInfo{}, err
 	}
-	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(
 		cctx,
@@ -229,7 +240,7 @@ func InspectVideo(ctx context.Context, filePath string) (MediaInfo, error) {
 		filePath,
 	).Output()
 	if err != nil {
-		return MediaInfo{}, model.NewFault("UNSUPPORTED_VIDEO", "Invalid or unreadable video.", false, 0)
+		return MediaInfo{}, classifyProbeError(ctx, cctx, err)
 	}
 	var parsed struct {
 		Streams []struct {
@@ -272,6 +283,37 @@ func InspectVideo(ctx context.Context, filePath string) (MediaInfo, error) {
 		FileSize:   st.Size(),
 		Sha256:     sha,
 	}, nil
+}
+
+// classifyProbeError separates tool faults from hostile files for a failed ffprobe run.
+// Shutdown or a caller deadline, a missing binary and SIGKILL (usually the OOM killer) are
+// transient. A run that hits probeTimeout, exits non-zero or dies of another signal is the file's fault.
+func classifyProbeError(parent, probe context.Context, err error) error {
+	if parent.Err() != nil {
+		return model.NewFault("MEDIA_TOOL", "Media tools were unavailable. Retry later.", true, 0)
+	}
+	if probe.Err() != nil {
+		return model.NewFault("UNSUPPORTED_VIDEO", "Invalid or unreadable video.", false, 0)
+	}
+	if errors.Is(err, exec.ErrNotFound) {
+		return model.NewFault("MEDIA_TOOL", "Media tools were unavailable. Retry later.", true, 0)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() && status.Signal() == syscall.SIGKILL {
+			return model.NewFault("MEDIA_TOOL", "Media tools were unavailable. Retry later.", true, 0)
+		}
+	}
+	return model.NewFault("UNSUPPORTED_VIDEO", "Invalid or unreadable video.", false, 0)
+}
+
+// missingOrRaw: a file that is gone cannot be retried into existence, so it stays unsupported.
+// Any other open failure is an environment fault and keeps its raw error for a transient retry.
+func missingOrRaw(err error) error {
+	if errors.Is(err, os.ErrNotExist) {
+		return model.NewFault("UNSUPPORTED_IMAGE", "Invalid or oversized image.", false, 0)
+	}
+	return err
 }
 
 func runFFmpegThumbnail(ctx context.Context, inputPath, outputPath string, size int, seekOneSec bool) error {

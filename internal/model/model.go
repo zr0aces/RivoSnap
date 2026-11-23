@@ -40,6 +40,11 @@ var States = []State{
 	StateUnrecoverable,
 }
 
+// MaxAutoAttempts is the retry budget of one cycle: a transient failure whose budget
+// is below it is retried, so a cycle has MaxAutoAttempts-1 automatic retries. Their
+// waits Backoff(1)..Backoff(15) span about 3 to 6 hours, because Backoff caps at 1 hour.
+const MaxAutoAttempts = 16
+
 var Terminal = []State{
 	StateSynced,
 	StateNeedsReview,

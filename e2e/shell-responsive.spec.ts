@@ -255,7 +255,7 @@ test("More dot and sheet status reflect queue and health states", async ({
   // 4. Degraded health + idle queue -> dot + "Needs attention"
   await setupRoutes({
     stats: { failed: 0, pending: 0 },
-    health: { database: "Online", redis: "PONG", worker: "Offline", diskPressure: false },
+    health: { database: "Online", redis: "PONG", worker: "Heartbeat missing", diskPressure: false },
   });
   await page.goto("/");
   await expect(page.locator(".mobileNavDot")).toHaveCount(1);
@@ -387,7 +387,7 @@ test("header and health statuses contain double-size text", async ({
 }) => {
   await mockApi(page, normal);
   await page.goto("/health");
-  await expect(page.getByText("Offline", { exact: true }).last()).toBeVisible();
+  await expect(page.getByText("Heartbeat missing", { exact: true }).last()).toBeVisible();
   await expect(page.locator(".workspace header .pill")).toBeVisible();
   await page.addStyleTag({ content: ":root { font-size: 29px }" });
   for (const el of await page.locator(".healthCard, .workspace header").all()) {

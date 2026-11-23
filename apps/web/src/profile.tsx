@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   startAuthentication,
   startRegistration,
@@ -33,6 +33,8 @@ const actions = {
   remove: "Remove passkey",
 };
 type Action = keyof typeof actions;
+// Identifies the control that opens a change form, so focus can return to it.
+const changeKey = (action: Action, target: string) => action + ":" + target;
 
 export function passkeyAvailable() {
   return window.isSecureContext && browserSupportsWebAuthn();
@@ -51,6 +53,22 @@ export function Profile() {
     target: string;
   } | null>(null);
   const owner = profile.data;
+  const rootRef = useRef<HTMLDivElement>(null),
+    returnKey = useRef<string | null>(null);
+  // When a form closes, focus returns to the control that opened it.
+  useEffect(() => {
+    if (selection || !returnKey.current) return;
+    const key = returnKey.current;
+    returnKey.current = null;
+    Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-change]") ?? [])
+      .find((el) => el.dataset.change === key)
+      ?.focus();
+  }, [selection]);
+  const openChange = (action: Action, target: string) => {
+    returnKey.current = changeKey(action, target);
+    setSelection({ action, target });
+  };
+  const toggle: Action = owner?.totp ? "disable" : "enable";
   return (
     <>
       <Title
@@ -65,7 +83,7 @@ export function Profile() {
             : "Loading profile…"}
         </p>
       ) : (
-        <div className="profileSecurity">
+        <div className="profileSecurity" ref={rootRef}>
           <section className="panel">
             <small>SIGNED IN AS</small>
             <h2>{owner.email}</h2>
@@ -87,12 +105,8 @@ export function Profile() {
                 </p>
                 <Button
                   variant="secondary"
-                  onClick={() =>
-                    setSelection({
-                      action: owner.totp ? "disable" : "enable",
-                      target: "",
-                    })
-                  }
+                  data-change={changeKey(toggle, "")}
+                  onClick={() => openChange(toggle, "")}
                 >
                   {owner.totp ? actions.disable : actions.enable}
                 </Button>
@@ -100,16 +114,16 @@ export function Profile() {
                   <>
                     <Button
                       variant="secondary"
-                      onClick={() => setSelection({ action: "replace", target: "" })}
+                      data-change={changeKey("replace", "")}
+                      onClick={() => openChange("replace", "")}
                     >
                       {actions.replace}
                     </Button>
                     <p>{owner.recoveryRemaining} unused recovery codes</p>
                     <Button
                       variant="secondary"
-                      onClick={() =>
-                        setSelection({ action: "regenerate", target: "" })
-                      }
+                      data-change={changeKey("regenerate", "")}
+                      onClick={() => openChange("regenerate", "")}
                     >
                       {actions.regenerate}
                     </Button>
@@ -128,7 +142,8 @@ export function Profile() {
                     <Button
                       variant="ghost"
                       aria-label={actions.remove + ": " + name}
-                      onClick={() => setSelection({ action: "remove", target: id })}
+                      data-change={changeKey("remove", id)}
+                      onClick={() => openChange("remove", id)}
                     >
                       Remove
                     </Button>
@@ -137,7 +152,8 @@ export function Profile() {
                 <Button
                   disabled={!passkeyAvailable()}
                   variant="secondary"
-                  onClick={() => setSelection({ action: "add", target: "" })}
+                  data-change={changeKey("add", "")}
+                  onClick={() => openChange("add", "")}
                 >
                   Add passkey
                 </Button>
@@ -169,6 +185,11 @@ function ChangeForm({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [method, setMethod] = useState("password");
+  // The heading takes focus when the form opens, so keyboard users start inside it.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget,
@@ -225,7 +246,7 @@ function ChangeForm({
   }
   return (
     <form className="panel" onSubmit={submit}>
-      <h2>{actions[action]}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>{actions[action]}</h2>
       {action === "remove" && (
         <p>Remove “{owner.passkeys[target]}” from this account?</p>
       )}

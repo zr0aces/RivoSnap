@@ -39,7 +39,16 @@ graphify-out/
 .worktrees/
 cache/
 .DS_Store
-.agent-parity/
+# agent-parity: managed files are tracked; runtime, cache, log and secret paths are not.
+.agent-parity/mcp/memory/dist/
+.agent-parity/**/*.log
+.agent-parity/**/*.pid
+.agent-parity/**/*.lock
+.agent-parity/**/*.tmp
+.agent-parity/**/.env*
+.agent-parity/**/*.key
+.agent-parity/**/*.pem
+**/.*.agent-parity.*
 # agent-parity:begin
 !/.codex/
 /.claude/*

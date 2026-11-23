@@ -85,3 +85,83 @@ test("sign-out failure stays visible and allows retry", async ({ page }) => {
   await button.click();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
 });
+
+test("viewer keeps the selected photo when the list refreshes", async ({ page }) => {
+  await page.clock.install();
+  await mockApi(page, normal);
+  await page.goto("/gallery");
+  await expect(page.locator("button.photo")).toHaveCount(3);
+  await page.locator("button.photo").nth(1).click();
+  const viewer = page.getByRole("dialog");
+  await expect(viewer.locator("img")).toHaveAttribute("src", /\/images\/trips\/content$/);
+  await expect(viewer.getByText("2 / 3", { exact: true })).toBeVisible();
+
+  // A newer photo arrives at the front; the 15 s poll refetches the same page.
+  const fresh = { ...normal.images[0], id: "fresh" };
+  await page.route("**/api/v1/images*", (route) =>
+    route.fulfill({
+      json: { items: [fresh, ...normal.images], total: normal.images.length + 1, page: 1 },
+    }),
+  );
+  const refreshed = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/v1/images" && r.status() === 200,
+  );
+  await page.clock.fastForward(16_000);
+  await refreshed;
+  await expect(page.locator("button.photo")).toHaveCount(4);
+  await expect(viewer.getByText("3 / 4", { exact: true })).toBeVisible();
+  await expect(viewer.locator("img")).toHaveAttribute("src", /\/images\/trips\/content$/);
+});
+
+test("page past the end links to the last page", async ({ page }) => {
+  await mockApi(page, normal);
+  await page.goto("/gallery?page=9");
+  await expect(page.locator(".empty h2")).toHaveText("Page 9 is past the end.");
+  await expect(page.locator(".empty p")).toHaveText("Last page has the oldest matching items.");
+  await page.getByRole("link", { name: "Last page" }).click();
+  await expect(page).toHaveURL(/[?&]page=1(&|$)/);
+  await expect(page.locator("button.photo")).toHaveCount(3);
+});
+
+test("viewer stays closed when its photo returns after leaving the page", async ({ page }) => {
+  await page.clock.install();
+  await mockApi(page, normal);
+  await page.goto("/gallery");
+  await page.locator("button.photo").nth(1).click();
+  const viewer = page.getByRole("dialog");
+  await expect(viewer.locator("img")).toHaveAttribute("src", /\/images\/trips\/content$/);
+
+  // The photo leaves the list: the viewer closes.
+  const withoutTrips = [normal.images[0], normal.images[2]];
+  await page.route("**/api/v1/images*", (route) =>
+    route.fulfill({ json: { items: withoutTrips, total: withoutTrips.length, page: 1 } }),
+  );
+  let refreshed = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/v1/images" && r.status() === 200,
+  );
+  await page.clock.fastForward(16_000);
+  await refreshed;
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  // It comes back on a later refresh: nothing reopens the viewer.
+  await page.route("**/api/v1/images*", (route) =>
+    route.fulfill({ json: { items: normal.images, total: normal.images.length, page: 1 } }),
+  );
+  refreshed = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/v1/images" && r.status() === 200,
+  );
+  await page.clock.fastForward(16_000);
+  await refreshed;
+  await expect(page.locator("button.photo")).toHaveCount(3);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("page parameter is validated like the API", async ({ page }) => {
+  await mockApi(page, normal);
+  await page.goto("/gallery");
+  const status = await page.evaluate(async () => {
+    const res = await fetch("/api/v1/images?page=0");
+    return res.status;
+  });
+  expect(status).toBe(400);
+});

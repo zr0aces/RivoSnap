@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -130,10 +130,13 @@ function Lightbox({
   );
 }
 
+const pageSize = 36;
+
 export function Library({ jobs = false }: { jobs?: boolean }) {
   const [sp, setParams] = useSearchParams(),
     [filtersOpen, setFiltersOpen] = useState(false),
-    [index, setIndex] = useState<number | null>(null),
+    // The viewer follows the photo, not its position: a refresh can move the list under it.
+    [selectedId, setSelectedId] = useState<string | null>(null),
     [confirmDiscard, setConfirmDiscard] = useState<string | null>(null);
   const prefs = query<Settings>("/settings"),
     action = useAction(),
@@ -146,7 +149,7 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
     if (k !== "page") p.delete("page");
     if (v) p.set(k, v);
     else p.delete(k);
-    setIndex(null);
+    setSelectedId(null);
     setParams(p);
   };
   const groupFilter = sp.get("group");
@@ -158,6 +161,17 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
     sp.get("to") && "Through " + sp.get("to"),
   ].filter(Boolean);
   const d = q.data;
+  const index = d ? d.items.findIndex((p) => p.id === selectedId) : -1;
+  // Once the list has loaded without the open photo, forget it, so a later refresh cannot reopen the viewer.
+  useEffect(() => {
+    if (d && selectedId && !d.items.some((p) => p.id === selectedId)) setSelectedId(null);
+  }, [d, selectedId]);
+  // The same filters, on the last page that exists.
+  const lastPageParams = new URLSearchParams(sp);
+  lastPageParams.set(
+    "page",
+    String(Math.max(1, Math.ceil((d?.total ?? 0) / pageSize))),
+  );
 
   return (
     <>
@@ -234,7 +248,7 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
               type="button"
               variant="ghost"
               onClick={() => {
-                setIndex(null);
+                setSelectedId(null);
                 setParams({});
               }}
             >
@@ -265,6 +279,15 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
                 {jobs
                   ? "Unfinished uploads will appear here."
                   : "Try a different filter or send a new image to an enabled group."}
+              </p>
+            </div>
+          ) : d.items.length === 0 ? (
+            <div className="empty">
+              <ImageIcon size={28} />
+              <h2>Page {d.page} is past the end.</h2>
+              <p>
+                <Link to={"?" + lastPageParams.toString()}>Last page</Link> has the oldest
+                matching items.
               </p>
             </div>
           ) : (
@@ -381,7 +404,7 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
                   <button
                     className="photo"
                     key={p.id}
-                    onClick={() => setIndex(i)}
+                    onClick={() => setSelectedId(p.id)}
                   >
                     <img
                       loading="lazy"
@@ -427,18 +450,18 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
             </span>
             <Button
               variant="secondary"
-              disabled={d.page * 36 >= d.total}
+              disabled={d.page * pageSize >= d.total}
               onClick={() => set("page", String(d.page + 1))}
             >
               Next
             </Button>
           </footer>
-          {index !== null && d.items[index] && (
+          {index >= 0 && d.items[index] && (
             <Lightbox
               items={d.items}
               index={index}
-              set={setIndex}
-              close={() => setIndex(null)}
+              set={(n) => setSelectedId(d.items[n]?.id ?? null)}
+              close={() => setSelectedId(null)}
             />
           )}
         </>

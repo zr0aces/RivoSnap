@@ -83,7 +83,9 @@ export function Onboarding({
       steps: [
         {
           title: "Send a test image",
-          desc: "Post a new image in an enabled group (old messages, videos, and DMs are skipped).",
+          desc: prefs?.collectVideos
+            ? "Post a new image or video in an enabled group (old messages and DMs are skipped)."
+            : "Post a new image in an enabled group (old messages, videos, and DMs are skipped).",
           to: "/jobs",
           cta: "Monitor queue",
           done: stats.total > 0,

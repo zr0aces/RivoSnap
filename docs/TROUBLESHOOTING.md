@@ -9,6 +9,8 @@
 | Missing group | Enable LINE group participation and invite the correct Official Account. Direct messages and rooms never register. An already joined group can be discovered by a new group image but stays disabled. |
 | No image after enabling | Send a **new image** after enablement. Check membership, configuration and worker heartbeat. LINE_404/410 means content is no longer available; sending a new image is required. |
 | OAuth consent fails | Match redirect URI exactly, enable Library API, add test user if needed, grant all requested scopes (`appendonly`, `readonly.appcreateddata`, `edit.appcreateddata`). Reauthorize the original account/project after invalid_grant. |
+| Sign-in is busy (503) | The API is already hashing its maximum number of passwords. Wait a few seconds and try again; wrong passwords still answer 401. Repeated busy responses point to a flood of sign-in attempts; check the rate limit and the source addresses. |
+| `MEDIA_TOOL` fault | `ffprobe` or `ffmpeg` was missing, killed, or interrupted by a shutdown. The item retries automatically and nothing is discarded. A file that makes `ffprobe` fail or hang is `UNSUPPORTED_VIDEO` instead. |
 | Rate limit/network | Wait for bounded backoff and Retry-After. Inspect the queue and health before retrying. Do not replay the original webhook to force another upload. |
 | Album capacity or account storage | Resolve the provider limit, then retry FAILED. No overflow album is created; changing strategy needs explicit approval. |
 | ALBUM_REVIEW | Inspect the app-created destination albums in Google. In LINE groups resolve the flag using a verified **Library API album ID**, not the browser sharing URL. Leave it blank only after confirming no album was created. Resolving re-queues every image in that group that failed with `ALBUM_REVIEW`; the UI shows how many. Never guess based solely on a title. |
@@ -44,7 +46,7 @@ Before the production run, the owner must rehearse on a restored copy of a recen
 Production run, in this order. The cutover is the time the Go backend first ran, as Bangkok wall clock.
 
 1. Back up the database.
-2. Stop `api` and `worker`.
-3. Dry run: `psql -v cutover_bkk='<cutover, YYYY-MM-DD HH:MM:SS>' -U <user> -d <database> -f scripts/repair/2026-11-21-utc-timestamps.sql`. It prints the per-column preview, then rolls back and changes nothing. Check the counts against what you expect for that cutover. A wrong cutover otherwise commits a silent shift that only the step-1 backup can undo.
-4. Apply: rerun the same command with `-v apply=1` added. It commits; a failure rolls everything back.
+2. Stop the application containers: `docker compose stop api worker`. A plain `docker compose stop` also stops PostgreSQL, which the repair needs.
+3. Dry run, from the directory holding your Compose file (GHCR-only operators: first download `scripts/repair/2026-11-21-utc-timestamps.sql` from the repository at the release tag that matches your images): `docker compose exec -T postgres psql -v cutover_bkk='<cutover, YYYY-MM-DD HH:MM:SS>' -U gallery -d gallery -f - < scripts/repair/2026-11-21-utc-timestamps.sql`. It prints the per-column preview, then rolls back and changes nothing. Check the counts against what you expect for that cutover. A wrong cutover otherwise commits a silent shift that only the step-1 backup can undo.
+4. Apply: rerun the same command with `-v apply=1` added before `-v cutover_bkk`, as `docker compose exec -T postgres psql -v apply=1 -v cutover_bkk='<cutover>' -U gallery -d gallery -f - < scripts/repair/2026-11-21-utc-timestamps.sql`. It commits; a failure rolls everything back.
 5. Deploy and start the fixed build. On startup the API migrates every timestamp column to `timestamptz` (`202611210001_timestamptz`). After that the repair refuses to run and cannot be redone safely.

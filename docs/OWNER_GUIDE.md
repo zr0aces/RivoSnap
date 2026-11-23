@@ -47,7 +47,7 @@ Security changes require fresh verification and sign out all sessions. Keep an i
 ## If a photo does not appear
 
 1. **No queue entry and no gallery image:** confirm the group was enabled **before** the photo was sent. Check webhook verification and send one new test image.
-2. **RETRY_PENDING:** wait for the scheduled retry. **FAILED:** read the error, fix its cause, then select **Retry upload**. A full album will not roll over to a second album automatically.
+2. **RETRY_PENDING:** wait for the scheduled retry. **FAILED:** read the error, fix its cause, then select **Retry upload**. Retry upload starts a fresh retry schedule. A RETRY_PENDING item retries automatically for about 6 hours at most before it becomes FAILED. A full album will not roll over to a second album automatically.
 3. **NEEDS_REVIEW:** Google may already have created the photo. Select **Reconcile with Google** to search the mapped album without uploading again. Do not resend the photo merely to clear this state.
 4. **UNRECOVERABLE:** read the reason. If LINE content expired, send a new copy. If the format or size was rejected, send a supported image within the configured limit rather than retrying the rejected file.
 5. **Disk warning:** resolve stalled uploads or ask the administrator to expand storage. **Discard expired original** is irreversible: if Google has no copy, the photo may be lost. Do not use discard as a retry step.

@@ -39,7 +39,15 @@ import {
 } from "lucide-react";
 import { Button } from "../../../packages/ui/button";
 import { api, ApiError, query, labels, type Stats } from "./data";
-import { Dashboard, Groups, Settings, Health, healthStatus } from "./workspace";
+import {
+  AlbumsView,
+  Dashboard,
+  Groups,
+  Settings,
+  Health,
+  healthLabels,
+  healthStatus,
+} from "./workspace";
 import { Library } from "./photos";
 import { Profile, passkeyAvailable, passkeyLogin } from "./profile";
 import "./style.css";
@@ -97,13 +105,6 @@ function useCompactShell() {
     () => false,
   );
 }
-
-const healthLabels: Record<string, string> = {
-  database: "Database",
-  redis: "Redis",
-  worker: "Worker",
-  diskPressure: "Disk",
-};
 
 type HealthQuery = UseQueryResult<Record<string, string | boolean>>;
 
@@ -213,7 +214,7 @@ function Brand() {
 }
 
 function Login({ setup }: { setup: boolean }) {
-  const { register, handleSubmit, formState, reset } = useForm<{
+  const { register, handleSubmit, formState, reset, setFocus } = useForm<{
     email: string;
     password: string;
     bootstrap: string;
@@ -222,6 +223,12 @@ function Login({ setup }: { setup: boolean }) {
   const [mfaPending, setMfaPending] = useState(false),
     [code, setCode] = useState(""),
     [busy, setBusy] = useState(false);
+  const wasMfaPending = useRef(false);
+  useEffect(() => {
+    // The email input mounts again on the render after MFA ends, so focus it from an effect.
+    if (wasMfaPending.current && !mfaPending) setFocus("email");
+    wasMfaPending.current = mfaPending;
+  }, [mfaPending, setFocus]);
   return (
     <main className="entry">
       <div className="entrySide">
@@ -632,21 +639,37 @@ function CompactShellNav({
   );
 }
 
+// Storage can be blocked (private modes, strict browser settings). The app then runs without a saved theme.
+function readTheme(): boolean {
+  try {
+    return localStorage.getItem("gallery-theme") === "dark";
+  } catch {
+    return false;
+  }
+}
+
+function saveTheme(dark: boolean) {
+  try {
+    localStorage.setItem("gallery-theme", dark ? "dark" : "light");
+  } catch {
+    // The choice lasts for this page only.
+  }
+}
+
 function App() {
   const [logoutFailed, setLogoutFailed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [dark, theme] = useState(
-    () => localStorage.getItem("gallery-theme") === "dark",
-  );
+  const [dark, theme] = useState(readTheme);
   const compact = useCompactShell();
   const prevCompactRef = useRef(compact);
   const asideRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
 
-  useEffect(() => {
+  // Layout effect: the theme is set before the browser paints the shell.
+  useLayoutEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
-    localStorage.setItem("gallery-theme", dark ? "dark" : "light");
+    saveTheme(dark);
   }, [dark]);
 
   useEffect(() => {
@@ -676,7 +699,8 @@ function App() {
     authenticated,
   );
 
-  if (auth.error)
+  // Cached status keeps the open workspace (forms, lightbox, MFA step) through a failed refresh.
+  if (auth.error && !auth.data)
     return (
       <main className="authState">
         <p role="alert">Cannot reach the gallery. Check the API connection.</p>
@@ -778,7 +802,7 @@ function App() {
           <Route path="gallery" element={<Library key="gallery" />} />
           <Route path="jobs" element={<Library jobs key="jobs" />} />
           <Route path="groups" element={<Groups />} />
-          <Route path="albums" element={<Groups albums />} />
+          <Route path="albums" element={<AlbumsView />} />
           <Route path="profile" element={<Profile />} />
           <Route path="settings" element={<Settings />} />
           <Route path="health" element={<Health />} />

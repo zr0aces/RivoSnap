@@ -87,6 +87,82 @@ function dataset(stressed: boolean) {
 export const normal = dataset(false),
   stress = dataset(true);
 export type Auth = "owner" | "login" | "setup";
+export type ActivityDay = {
+  date: string;
+  imagesReceived: number;
+  videosReceived: number;
+  imagesUploaded: number;
+  videosUploaded: number;
+};
+
+// Seven Bangkok days ending on the fixture date, so the default chart has data.
+const activity: ActivityDay[] = [
+  "2026-04-25",
+  "2026-04-26",
+  "2026-04-27",
+  "2026-04-28",
+  "2026-04-29",
+  "2026-04-30",
+  "2026-05-01",
+].map((date, i) => ({
+  date,
+  imagesReceived: i % 3,
+  videosReceived: i % 2,
+  imagesUploaded: (i + 1) % 4,
+  videosUploaded: i % 3 === 0 ? 1 : 0,
+}));
+
+const pageSize = 36;
+
+// The calendar day in Bangkok, the day the Library's from and to filters compare.
+function bangkokDay(iso: string) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok" }).format(
+    new Date(iso),
+  );
+}
+
+// Applies the from/to day range, then the server-style page of 36 (the page echoes back).
+function listing(items: Photo[], params: URLSearchParams) {
+  const from = params.get("from"),
+    to = params.get("to");
+  const matching = items.filter((p) => {
+    const day = bangkokDay(p.lineEventTimestamp);
+    return (!from || day >= from) && (!to || day <= to);
+  });
+  const page = Math.max(1, Number(params.get("page")) || 1);
+  return {
+    items: matching.slice((page - 1) * pageSize, page * pageSize),
+    total: matching.length,
+    page,
+  };
+}
+
+// Replaces /auth/status with a sequence of responses; the last one repeats. Register
+// it after mockApi, because the most recent matching route handler wins.
+export async function statusSequence(
+  page: Page,
+  responses: Array<{ status: number; body?: unknown }>,
+) {
+  let calls = 0;
+  await page.route("**/api/v1/auth/status", (route) => {
+    const step = responses[Math.min(calls, responses.length - 1)];
+    calls += 1;
+    if (step.status === 200) return route.fulfill({ json: step.body });
+    return route.fulfill({ status: step.status, json: { error: "Unavailable." } });
+  });
+}
+
+// Signed in on the first status check; every later check fails with 503.
+export function signedInThenFailing(page: Page) {
+  return statusSequence(page, [
+    {
+      status: 200,
+      body: { authenticated: true, setup: false },
+    },
+    { status: 503 },
+  ]);
+}
+
 const settings: Settings = {
   stagingHours: 24,
   failedDays: 7,
@@ -121,6 +197,13 @@ export async function mockApi(
         ),
       });
     if (path === "/jobs" || path === "/images") {
+      // Same validation as the API: page must be an integer from 1 to 100000.
+      const rawPage = searchParams.get("page");
+      if (rawPage && (!/^\d+$/.test(rawPage) || Number(rawPage) < 1 || Number(rawPage) > 100000))
+        return route.fulfill({
+          status: 400,
+          json: { error: "Invalid request. Check the submitted values." },
+        });
       const items = (path === "/jobs" ? data.jobs : data.images).filter(
         (p) =>
           (!searchParams.has("status") ||
@@ -128,17 +211,18 @@ export async function mockApi(
           (!searchParams.has("group") ||
             searchParams.get("group") === p.lineGroupId),
       );
-      return route.fulfill({ json: { items, total: items.length, page: 1 } });
+      return route.fulfill({ json: listing(items, searchParams) });
     }
     const values: Record<string, unknown> = {
       "/groups": data.groups,
       "/dashboard/stats": data.stats,
+      "/dashboard/activity": activity,
       "/settings": settings,
       "/google/status": { status: "CONNECTED" },
       "/health": {
         database: "Online",
         redis: "Online",
-        worker: "Offline",
+        worker: "Heartbeat missing",
         diskPressure: false,
         workerLastProgressAt: timestamp,
       },
