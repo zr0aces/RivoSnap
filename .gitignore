@@ -32,22 +32,12 @@ docker-compose.override.yml
 
 # Knowledge graph and local tool state
 graphify-out/
-.claude/settings.local.json
-.claude/worktrees/
-.codex/
 .gemini/
 .worktrees/
 cache/
 .DS_Store
-# agent-parity: managed files are tracked; runtime, cache, log and secret paths are not.
-.agent-parity/mcp/memory/dist/
-.agent-parity/**/*.log
-.agent-parity/**/*.pid
-.agent-parity/**/*.lock
-.agent-parity/**/*.tmp
-.agent-parity/**/.env*
-.agent-parity/**/*.key
-.agent-parity/**/*.pem
+# agent-parity: local install, launchers and memory store are not tracked.
+.agent-parity/
 **/.*.agent-parity.*
 # agent-parity:begin
 !/.codex/

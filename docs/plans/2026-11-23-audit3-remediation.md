@@ -9,7 +9,7 @@ Fix every finding in [`docs/audit/2026-11-23-audit-report.md`](../audit/2026-11-
 Binding user decisions:
 
 - **AUD3-010:** documentation only. No release commit, tag, `VERSION` change or code guard. The migration runner already refuses to start a pre-MFA binary against an MFA database (`internal/db/migrate.go:145`, "database has migrations unknown to this binary"; `cmd/rivosnap/main.go` exits 1), so a rollback fails closed.
-- **AUD3-005:** track the agent-parity managed files and ignore only runtime, cache, log and secret paths.
+- **AUD3-005:** ~~track the agent-parity managed files and ignore only runtime, cache, log and secret paths.~~ Decision reversed by owner decision on 2026-11-23 after PR #20 opened: `.agent-parity/` is ignored again and the 21 files were untracked with `git rm --cached` (local copies kept); a fresh clone needs a local agent-parity install.
 
 Out of scope: a release or version bump, `GOMEMLIMIT` (see the values table), a bulk "retry all FAILED" action, new dependencies, and the OpenAPI document version (it identifies the API contract, not a calendar release).
 
@@ -51,7 +51,7 @@ Line numbers are from `a9ac792`; find each site by the function named next to it
 | AUD3-002 | MEDIUM | 3 | Budget cycle ends at the last FAILED attempt, so owner retry resets it; 15 retries over 3–6 h; no migration |
 | AUD3-003 | MEDIUM | 2 | Retry routes to download unless the original has recorded checksum and MIME |
 | AUD3-004 | MEDIUM | 12 | Blocking error only when there is no cached auth data |
-| AUD3-005 | MEDIUM | 21 | Track agent-parity managed files; narrow `.gitignore` |
+| AUD3-005 | MEDIUM | 21 | ~~Track agent-parity managed files; narrow `.gitignore`~~ Reversed: keep `.agent-parity/` local and ignored |
 | AUD3-006 | LOW | 4 | Detached persistence, album creation not cancelled by SIGTERM, interrupted attempts not counted, 110 s grace period |
 | AUD3-007 | LOW | 5 | SIGKILL, missing binary, cancelled parent context and filesystem errors are transient; bad exits, other signals and the inner timeout stay unsupported |
 | AUD3-008 | LOW | 6 | Preview failure no longer blocks upload |
@@ -229,6 +229,7 @@ Run tasks in order. Where a task says "test first", write the failing test, run 
   - Verify: `rtk docker compose --profile edge config --quiet`; local `rtk docker build -f Dockerfile.api -t rivosnap-api:ci .` and `-f Dockerfile.worker` if a daemon is available; parse both workflow files (`rtk proxy python3 -I -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" <file>` or `actionlint` when installed). The first PR run is the final proof.
 
 - [x] **Task 21: Track agent-parity managed files (AUD3-005)**
+  - **Reversed (2026-11-23):** reversed by owner decision on 2026-11-23 after PR #20 opened: `.agent-parity/` is ignored again and the 21 files were untracked with `git rm --cached` (local copies kept); a fresh clone needs a local agent-parity install. The steps below record what was originally done.
   - Inspected first (2026-11-23): `.agent-parity/` holds 21 files and one empty directory. Status: `rtk proxy .agent-parity/bin/agent-parity status` reports `git: IGNORED and will not sync via git: .agent-parity`. The MCP server binary is not inside the directory: `run.sh` downloads and checksum-verifies it into the shared cache (`~/.cache/agent-parity`); `mcp/memory/dist/` is a legacy in-tree location. A search of the directory for secret-like strings found none.
   - Files: `.gitignore` (replace line 42, `.agent-parity/`, which sits outside the managed `agent-parity:begin/end` block); the 21 files below.
   - **Become tracked (21):** `.agent-parity/bin/agent-parity`, `bin/agent-parity.cmd`, `claude/settings.json`, `mcp/memory/RELEASE`, `mcp/memory/VERSION`, `mcp/memory/run.cmd`, `mcp/memory/run.sh`, and under `scripts/`: `common.ps1`, `common.sh`, `merge-memory.sh`, `pre-push.sh`, `self-heal.ps1`, `self-heal.sh`, `status.ps1`, `status.sh`, `sync-claude.ps1`, `sync-claude.sh`, `uninstall.ps1`, `uninstall.sh`, `version.ps1`, `version.sh`. Memory entries (`.agent-parity/memory/*.md`) are tracked when they appear; the directory is empty today (nothing to add, no `.gitkeep`).
