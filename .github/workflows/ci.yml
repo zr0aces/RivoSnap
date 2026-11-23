@@ -13,14 +13,14 @@ jobs:
   go:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
       # Exact patch, not go-version-file: go.mod says 1.26.0 and govulncheck would flag
       # standard-library fixes already shipped in the image toolchain. Keep in sync with
       # the golang builder image in Dockerfile.api and Dockerfile.worker.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.27.4'
 
@@ -32,11 +32,11 @@ jobs:
   web:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
@@ -50,11 +50,11 @@ jobs:
   integration:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.27.4'
 
@@ -62,3 +62,51 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - run: bash scripts/test-integration.sh
+
+  # Builds the shipped images without pushing. The release workflow calls this file and
+  # publishes the same images itself, so the job is skipped on release events.
+  images:
+    if: github.event_name != 'release'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Build images and check embedded version
+        run: |
+          set -euo pipefail
+          for service in api worker; do
+            docker build -f "Dockerfile.$service" -t "rivosnap-$service:ci" .
+            docker run --rm --network none --entrypoint cat "rivosnap-$service:ci" /app/VERSION | cmp VERSION -
+          done
+
+      - name: Check media tools in the worker image
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --entrypoint ffmpeg rivosnap-worker:ci -version
+          docker run --rm --network none --entrypoint ffprobe rivosnap-worker:ci -version
+
+  compose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Validate edge Compose file
+        run: POSTGRES_PASSWORD=ci-check-only docker compose --profile edge config --quiet
+
+      - name: Validate example deploy Compose file
+        run: |
+          set -euo pipefail
+          DATABASE_URL='postgresql://gallery:ci-check-only@postgres:5432/gallery' \
+          REDIS_URL='redis://redis:6379' \
+          APP_URL='https://gallery.example.invalid' \
+          SESSION_SECRET='ci-check-only-session-secret' \
+          TOKEN_ENCRYPTION_KEY='0000000000000000000000000000000000000000000000000000000000000000' \
+          BOOTSTRAP_SECRET='ci-check-only-bootstrap' \
+          GOOGLE_REDIRECT_URI='https://gallery.example.invalid/api/v1/google/callback' \
+          POSTGRES_PASSWORD='ci-check-only' \
+          GHCR_OWNER='ci-check-only' \
+          docker compose -f docs/example-deploy/compose.yml config --quiet

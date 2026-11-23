@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"rivosnap/internal/db"
 	"rivosnap/internal/google"
 	"rivosnap/internal/media"
+	"rivosnap/internal/testguard"
 	"rivosnap/internal/worker"
 )
 
@@ -65,9 +67,7 @@ func jsonResponse(status int, v any) *http.Response {
 }
 
 func TestFullPipelineIntegration(t *testing.T) {
-	if os.Getenv("GALLERY_INTEGRATION") == "" {
-		t.Skip("skipping integration test; set GALLERY_INTEGRATION=1")
-	}
+	testguard.Require(t)
 
 	temp := t.TempDir()
 	// Provide stub ffmpeg if host does not have ffmpeg installed
@@ -85,6 +85,13 @@ func TestFullPipelineIntegration(t *testing.T) {
 		_ = os.WriteFile(webpFixture, buf.Bytes(), 0o644)
 		webpStub := "#!/bin/sh\nout=\"\"\nfor arg in \"$@\"; do out=\"$arg\"; done\ncp \"" + webpFixture + "\" \"$out\"\n"
 		_ = os.WriteFile(filepath.Join(binDir, "ffmpeg"), []byte(webpStub), 0o755)
+		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
+	// A missing ffprobe is a transient tool fault (AUD3-007); this stub fails on garbage like the real tool.
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		binDir := filepath.Join(temp, "probe-bin")
+		_ = os.MkdirAll(binDir, 0o755)
+		_ = os.WriteFile(filepath.Join(binDir, "ffprobe"), []byte("#!/bin/sh\nexit 1\n"), 0o755)
 		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	env := config.Env{
@@ -790,9 +797,7 @@ func TestFullPipelineIntegration(t *testing.T) {
 
 func crashLoopFixture(t *testing.T, state string, attempts int) (*db.DB, *worker.Processor, string, string) {
 	t.Helper()
-	if os.Getenv("GALLERY_INTEGRATION") == "" {
-		t.Skip("skipping integration test; set GALLERY_INTEGRATION=1")
-	}
+	testguard.Require(t)
 	temp := t.TempDir()
 	env := config.Env{
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
@@ -925,14 +930,13 @@ type integrationEnv struct {
 	session string
 	dir     string
 	env     config.Env
+	server  *api.Server
 }
 
 // integrationServer builds an API server on the disposable Postgres/Redis, resets state and signs the owner in.
 func integrationServer(t *testing.T) integrationEnv {
 	t.Helper()
-	if os.Getenv("GALLERY_INTEGRATION") == "" {
-		t.Skip("skipping integration test; set GALLERY_INTEGRATION=1")
-	}
+	testguard.Require(t)
 	temp := t.TempDir()
 	env := config.Env{
 		AppURL:                 "http://localhost",
@@ -942,6 +946,7 @@ func integrationServer(t *testing.T) integrationEnv {
 		SessionSecret:          strings.Repeat("x", 32),
 		BootstrapSecret:        strings.Repeat("b", 24),
 		TokenEncryptionKey:     strings.Repeat("1", 64),
+		LineChannelAccessToken: "test",
 		GoogleClientID:         "client",
 		GoogleClientSecret:     "secret",
 		GoogleRedirectURI:      "http://localhost/api/v1/google/callback",
@@ -973,7 +978,8 @@ func integrationServer(t *testing.T) integrationEnv {
 	if err := store.InitDirs(); err != nil {
 		t.Fatal(err)
 	}
-	handler := api.NewServer(env, database, rdb, store).Handler()
+	server := api.NewServer(env, database, rdb, store)
+	handler := server.Handler()
 
 	setup := httptest.NewRequest("POST", "/api/v1/auth/setup", strings.NewReader(
 		`{"email":"owner@example.org","password":"long-fixture-password","bootstrap":"`+strings.Repeat("b", 24)+`"}`))
@@ -993,7 +999,7 @@ func integrationServer(t *testing.T) integrationEnv {
 	if session == "" {
 		t.Fatal("missing session cookie on setup")
 	}
-	return integrationEnv{ctx, database, store, handler, session, temp, env}
+	return integrationEnv{ctx, database, store, handler, session, temp, env, server}
 }
 
 func thumbnailFixture(t *testing.T, remote bool) (get func(ctx context.Context, id string) *httptest.ResponseRecorder, seed func() string, ffmpegLog string) {
@@ -1069,7 +1075,7 @@ func thumbnailFixture(t *testing.T, remote bool) (get func(ctx context.Context, 
 		if err := os.WriteFile(path, []byte("original"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := database.Pool.Exec(ctx, `INSERT INTO "Image" ("id", "lineGroupId", "channelId", "lineMessageId", "lineEventTimestamp", "uploadStatus", "stagingPath", "updatedAt") VALUES ($1, $2, 'channel', $3, NOW(), 'STAGED'::"UploadState", $4, NOW())`, id, lineGroupID, uuid.NewString(), path); err != nil {
+		if _, err := database.Pool.Exec(ctx, `INSERT INTO "Image" ("id", "lineGroupId", "channelId", "lineMessageId", "lineEventTimestamp", "uploadStatus", "stagingPath", "mimeType", "updatedAt") VALUES ($1, $2, 'channel', $3, NOW(), 'STAGED'::"UploadState", $4, 'image/png', NOW())`, id, lineGroupID, uuid.NewString(), path); err != nil {
 			t.Fatalf("seed image: %v", err)
 		}
 		return id
@@ -1189,9 +1195,7 @@ func TestThumbnailLeaderCancelDoesNotFailFollower(t *testing.T) {
 }
 
 func TestResolveAlbumRequeuesGroup(t *testing.T) {
-	if os.Getenv("GALLERY_INTEGRATION") == "" {
-		t.Skip("skipping integration test; set GALLERY_INTEGRATION=1")
-	}
+	testguard.Require(t)
 	srv := integrationServer(t)
 	ctx, database, handler, session := srv.ctx, srv.db, srv.handler, srv.session
 	var rec *httptest.ResponseRecorder
@@ -1621,5 +1625,73 @@ func TestLogoutRevocationFailure(t *testing.T) {
 	}
 	if rec = apiRequest(srv.handler, "GET", "/api/v1/health", "", srv.session); rec.Code != 401 {
 		t.Fatalf("revoked cookie was accepted: %d", rec.Code)
+	}
+}
+
+// An image that never passed inspection gets no on-demand ffmpeg run (AUD3-009).
+func TestQuarantinedRowGetsNoThumbnailRun(t *testing.T) {
+	srv := integrationServer(t)
+	ctx := context.Background()
+	binDir := filepath.Join(t.TempDir(), "bin")
+	logPath := filepath.Join(t.TempDir(), "ffmpeg.log")
+	ffmpegWebPScript(t, binDir) // writes fixture.webp into binDir
+	fixture := filepath.Join(binDir, "fixture.webp")
+	installFFmpeg(t, binDir, "#!/bin/sh\necho S >> \""+logPath+"\"\nout=\"\"\nfor arg in \"$@\"; do out=\"$arg\"; done\ncp \""+fixture+"\" \"$out\"\n")
+
+	lineGroupID := "quarantine-" + uuid.NewString()
+	if _, err := srv.db.Pool.Exec(ctx, `INSERT INTO "LineGroup" ("id", "lineGroupId", "enabled", "membershipAt", "lastEventAt", "updatedAt") VALUES ($1, $2, true, NOW(), NOW(), NOW())`, uuid.NewString(), lineGroupID); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+	seed := func(state string, mime *string, data []byte) string {
+		id := uuid.NewString()
+		path, err := srv.store.PathFor(id, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := srv.db.Pool.Exec(ctx, `INSERT INTO "Image" ("id", "lineGroupId", "channelId", "lineMessageId", "lineEventTimestamp", "uploadStatus", "stagingPath", "mimeType", "updatedAt") VALUES ($1, $2, 'channel', $3, NOW(), $4::"UploadState", $5, $6, NOW())`, id, lineGroupID, uuid.NewString(), state, path, mime); err != nil {
+			t.Fatalf("seed image: %v", err)
+		}
+		return id
+	}
+	png := "image/png"
+	validID := seed("STAGED", &png, makeTestPNG(t))
+	quarantinedID := seed("UNRECOVERABLE", nil, []byte("not a photo"))
+
+	rec := apiRequest(srv.handler, "GET", "/api/v1/images/"+quarantinedID+"/thumbnail", "", srv.session)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "Image not available yet.") {
+		t.Fatalf("quarantined row: expected 404 Image not available yet., got %d: %s", rec.Code, rec.Body.String())
+	}
+	if log, _ := os.ReadFile(logPath); len(log) != 0 {
+		t.Fatalf("ffmpeg ran on uninspected bytes: %q", log)
+	}
+
+	rec = apiRequest(srv.handler, "GET", "/api/v1/images/"+validID+"/thumbnail", "", srv.session)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("validated row must still render, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if log, _ := os.ReadFile(logPath); len(log) == 0 {
+		t.Fatal("validated row did not run ffmpeg; the control is not exercising the thumbnail path")
+	}
+}
+
+// A staging volume that cannot be read is a 500, not zeroed stats (AUD3-013).
+func TestDashboardStatsStagingErrorIs500(t *testing.T) {
+	srv := integrationServer(t)
+	if err := os.RemoveAll(srv.env.StagingPath); err != nil {
+		t.Fatal(err)
+	}
+	rec := apiRequest(srv.handler, "GET", "/api/v1/dashboard/stats", "", srv.session)
+	if rec.Code != 500 {
+		t.Fatalf("missing staging volume: expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := os.MkdirAll(srv.env.StagingPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rec = apiRequest(srv.handler, "GET", "/api/v1/dashboard/stats", "", srv.session)
+	if rec.Code != 200 {
+		t.Fatalf("restored staging volume: expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

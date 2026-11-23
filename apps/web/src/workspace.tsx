@@ -202,7 +202,7 @@ export function Dashboard() {
   );
 }
 
-function AlbumsView() {
+export function AlbumsView() {
   const q = query<Group[]>("/groups");
   const [filter, setFilter] = useState<"all" | "collecting" | "mapped">("all");
   const groups = q.data ?? [];
@@ -320,8 +320,7 @@ function AlbumsView() {
   );
 }
 
-export function Groups({ albums = false }: { albums?: boolean }) {
-  if (albums) return <AlbumsView />;
+export function Groups() {
   const q = query<Group[]>("/groups"),
     action = useAction();
   const [checkedMap, setCheckedMap] = useState<Record<string, boolean>>({});
@@ -811,6 +810,14 @@ export function healthStatus(
 
 declare const __APP_VERSION__: string;
 
+export const healthLabels: Record<string, string> = {
+  database: "Database",
+  redis: "Redis",
+  worker: "Worker",
+  diskPressure: "Disk",
+  lineCredentials: "LINE credentials",
+};
+
 export function Health() {
   const q = query<Record<string, string | boolean>>("/health");
   return (
@@ -830,12 +837,16 @@ export function Health() {
                 ? "Pressured"
                 : "Normal"
               : k === "workerLastProgressAt"
-                ? new Date(String(v)).toLocaleString()
+                ? date(String(v))
                 : String(v);
           return (
             <section className="healthCard" key={k}>
               <div className="row">
-                <b>{k === "workerLastProgressAt" ? "Last worker progress" : k}</b>
+                <b>
+                  {k === "workerLastProgressAt"
+                    ? "Last worker progress"
+                    : (healthLabels[k] ?? k)}
+                </b>
                 <span className={"pill " + state}>{display}</span>
               </div>
             </section>

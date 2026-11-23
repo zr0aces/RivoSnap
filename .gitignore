@@ -32,14 +32,13 @@ docker-compose.override.yml
 
 # Knowledge graph and local tool state
 graphify-out/
-.claude/settings.local.json
-.claude/worktrees/
-.codex/
 .gemini/
 .worktrees/
 cache/
 .DS_Store
+# agent-parity: local install, launchers and memory store are not tracked.
 .agent-parity/
+**/.*.agent-parity.*
 # agent-parity:begin
 !/.codex/
 /.claude/*

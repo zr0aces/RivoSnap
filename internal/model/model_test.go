@@ -22,3 +22,19 @@ func TestBackoffBounds(t *testing.T) {
 		t.Fatalf("expected cap <= 3600000, got %d", got)
 	}
 }
+
+// TestRetryHorizon pins the automatic retry window: MaxAutoAttempts-1 waits
+// (Backoff(1)..Backoff(15)) must span about 3 h at minimum jitter to about 6.1 h at maximum.
+func TestRetryHorizon(t *testing.T) {
+	const minTotal = 3 * 3600 * 1000
+	const maxTotal = 6*3600*1000 + 200*1000
+	for range 2000 {
+		total := 0
+		for n := 1; n < MaxAutoAttempts; n++ {
+			total += Backoff(n, 0)
+		}
+		if total < minTotal || total > maxTotal {
+			t.Fatalf("retry horizon %d ms outside [%d, %d]", total, minTotal, maxTotal)
+		}
+	}
+}

@@ -75,14 +75,24 @@ type Server struct {
 	// thumbSem caps concurrent on-demand ffmpeg runs; thumbFlight shares one run per id+size.
 	thumbSem    chan struct{}
 	thumbFlight singleflight.Group
+
+	// hashSem caps concurrent password hashing; hashWait is how long a request waits for a slot.
+	hashSem  chan struct{}
+	hashWait time.Duration
 }
 
 const (
 	maxThumbJobs     = 2
 	thumbWaitTimeout = 20 * time.Second
+	// maxHashJobs bounds concurrent Argon2 work process-wide: each hash holds 64 MiB (AUD3-001).
+	maxHashJobs     = 2
+	hashWaitTimeout = 5 * time.Second
 )
 
 var errThumbBusy = errors.New("thumbnail generation busy")
+
+// errHashBusy answers 503 with Retry-After when no password-hash slot frees in time.
+var errHashBusy = &httpError{status: 503, message: "Sign-in is busy. Try again shortly."}
 
 type thumbnailResult struct {
 	path, mime string
@@ -131,7 +141,44 @@ func NewServer(env config.Env, database *db.DB, rdb *redis.Client, store *media.
 		rateMap:   make(map[string]rateEntry),
 		authRates: make(map[string]rateEntry),
 		thumbSem:  make(chan struct{}, maxThumbJobs),
+		hashSem:   make(chan struct{}, maxHashJobs),
+		hashWait:  hashWaitTimeout,
 	}
+}
+
+// acquireHash waits for a password-hash slot, the hashWait timeout or request cancellation.
+// The returned release must be called exactly once when ok is true.
+func (s *Server) acquireHash(ctx context.Context) (release func(), ok bool) {
+	timer := time.NewTimer(s.hashWait)
+	defer timer.Stop()
+	select {
+	case s.hashSem <- struct{}{}:
+		return func() { <-s.hashSem }, true
+	case <-timer.C:
+		return nil, false
+	case <-ctx.Done():
+		return nil, false
+	}
+}
+
+// hashPassword runs Argon2 under the hash gate. The gate runs after the per-address rate check.
+func (s *Server) hashPassword(ctx context.Context, password string) (string, error) {
+	release, ok := s.acquireHash(ctx)
+	if !ok {
+		return "", errHashBusy
+	}
+	defer release()
+	return crypto.HashPassword(password)
+}
+
+// verifyPassword runs Argon2 verification under the hash gate.
+func (s *Server) verifyPassword(ctx context.Context, encodedHash, password string) (bool, error) {
+	release, ok := s.acquireHash(ctx)
+	if !ok {
+		return false, errHashBusy
+	}
+	defer release()
+	return crypto.VerifyPassword(encodedHash, password), nil
 }
 
 // peerHost returns the socket peer address without the port.
@@ -220,6 +267,9 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, errHashBusy) {
+		w.Header().Set("Retry-After", "2")
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		msg := he.message
@@ -511,7 +561,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request, mode string)
 			writeJSON(w, 403, map[string]string{"error": "Setup is locked or the setup key is incorrect."})
 			return
 		}
-		hash, err := crypto.HashPassword(b.Password)
+		hash, err := s.hashPassword(ctx, b.Password)
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -532,7 +582,15 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request, mode string)
 			writeErr(w, err)
 			return
 		}
-		if err != nil || !crypto.VerifyPassword(passwordHash, b.Password) || email != b.Email {
+		verified := false
+		if err == nil {
+			verified, err = s.verifyPassword(ctx, passwordHash, b.Password)
+			if err != nil {
+				writeErr(w, err)
+				return
+			}
+		}
+		if !verified || email != b.Email {
 			writeJSON(w, 401, map[string]string{"error": "Email or password is incorrect."})
 			return
 		}
@@ -1029,6 +1087,10 @@ func (s *Server) handleGetGroups(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result = append(result, m)
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, err)
+		return
 	}
 	writeJSON(w, 200, result)
 }
@@ -1573,18 +1635,24 @@ func (s *Server) handleGetImage(w http.ResponseWriter, r *http.Request) {
 		var aStarted time.Time
 		var aCompleted *time.Time
 		var aCode, aMsg *string
-		if err := attRows.Scan(&aid, &aImgID, &aNum, &aStatus, &aStarted, &aCompleted, &aCode, &aMsg); err == nil {
-			attempts = append(attempts, map[string]any{
-				"id":            aid,
-				"imageId":       aImgID,
-				"attemptNumber": aNum,
-				"status":        aStatus,
-				"startedAt":     fmtTime(aStarted),
-				"completedAt":   fmtTimePtr(aCompleted),
-				"errorCode":     aCode,
-				"errorMessage":  aMsg,
-			})
+		if err := attRows.Scan(&aid, &aImgID, &aNum, &aStatus, &aStarted, &aCompleted, &aCode, &aMsg); err != nil {
+			writeErr(w, err)
+			return
 		}
+		attempts = append(attempts, map[string]any{
+			"id":            aid,
+			"imageId":       aImgID,
+			"attemptNumber": aNum,
+			"status":        aStatus,
+			"startedAt":     fmtTime(aStarted),
+			"completedAt":   fmtTimePtr(aCompleted),
+			"errorCode":     aCode,
+			"errorMessage":  aMsg,
+		})
+	}
+	if err := attRows.Err(); err != nil {
+		writeErr(w, err)
+		return
 	}
 
 	writeJSON(w, 200, map[string]any{
@@ -1634,11 +1702,12 @@ func (s *Server) handleMediaStream(w http.ResponseWriter, r *http.Request, thumb
 
 	var mediaType string
 	var mimeType, stagingPath, googleMediaItemID *string
+	var uploadStatus string
 	if err := s.DB.Pool.QueryRow(
 		ctx,
-		`SELECT "mediaType", "mimeType", "stagingPath", "googleMediaItemId" FROM "Image" WHERE id = $1`,
+		`SELECT "mediaType", "mimeType", "stagingPath", "googleMediaItemId", "uploadStatus"::text FROM "Image" WHERE id = $1`,
 		imgID,
-	).Scan(&mediaType, &mimeType, &stagingPath, &googleMediaItemID); err != nil {
+	).Scan(&mediaType, &mimeType, &stagingPath, &googleMediaItemID, &uploadStatus); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -1681,7 +1750,9 @@ func (s *Server) handleMediaStream(w http.ResponseWriter, r *http.Request, thumb
 	}
 
 	hasRemote := googleMediaItemID != nil && *googleMediaItemID != ""
-	if !hasRemote && (!thumb || stagingPath == nil || *stagingPath == "") {
+	// ffmpeg runs only on bytes that passed inspection (mimeType recorded) and are not quarantined.
+	inspected := mimeType != nil && *mimeType != "" && uploadStatus != string(model.StateUnrecoverable)
+	if !hasRemote && (!thumb || stagingPath == nil || *stagingPath == "" || !inspected) {
 		writeJSON(w, 404, map[string]string{"error": "Image not available yet."})
 		return
 	}
@@ -2027,41 +2098,69 @@ func (s *Server) handleDashboardStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var oldest *time.Time
-	_ = s.DB.Pool.QueryRow(
+	if err := s.DB.Pool.QueryRow(
 		ctx,
 		`SELECT "createdAt" FROM "Image" WHERE "uploadStatus" <> 'SYNCED'::"UploadState" ORDER BY "createdAt" ASC LIMIT 1`,
-	).Scan(&oldest)
+	).Scan(&oldest); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeErr(w, err)
+		return
+	}
 
+	// Staging and thumbnail usage, free space and disk pressure must be readable; zeros would hide a broken volume.
 	dirs := s.Store.Dirs()
-	stagingBytes, _ := s.Store.Usage(dirs[0])
-	thumbnailBytes, _ := s.Store.Usage(dirs[1])
-	freeBytes, _ := s.Store.Free()
-	diskPressure, _ := s.Store.Pressured(policy.CollectVideos)
+	stagingBytes, err := s.Store.Usage(dirs[0])
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	thumbnailBytes, err := s.Store.Usage(dirs[1])
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	freeBytes, err := s.Store.Free()
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	diskPressure, err := s.Store.Pressured(policy.CollectVideos)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 
 	recent := make([]map[string]any, 0)
 	rows, err := s.DB.Pool.Query(
 		ctx,
 		`SELECT "id", "action", "targetType", "targetId", "metadata", "createdAt" FROM "AuditLog" ORDER BY "createdAt" DESC LIMIT 10`,
 	)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id, action, targetType, targetID string
-			var meta []byte
-			var createdAt time.Time
-			if rows.Scan(&id, &action, &targetType, &targetID, &meta, &createdAt) == nil {
-				var metaObj any = map[string]any{}
-				_ = json.Unmarshal(meta, &metaObj)
-				recent = append(recent, map[string]any{
-					"id":         id,
-					"action":     action,
-					"targetType": targetType,
-					"targetId":   targetID,
-					"metadata":   metaObj,
-					"createdAt":  fmtTime(createdAt),
-				})
-			}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, action, targetType, targetID string
+		var meta []byte
+		var createdAt time.Time
+		if err := rows.Scan(&id, &action, &targetType, &targetID, &meta, &createdAt); err != nil {
+			writeErr(w, err)
+			return
 		}
+		var metaObj any = map[string]any{}
+		_ = json.Unmarshal(meta, &metaObj)
+		recent = append(recent, map[string]any{
+			"id":         id,
+			"action":     action,
+			"targetType": targetType,
+			"targetId":   targetID,
+			"metadata":   metaObj,
+			"createdAt":  fmtTime(createdAt),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, err)
+		return
 	}
 
 	gStatus := "DISCONNECTED"
@@ -2107,18 +2206,26 @@ func openAPISpec() map[string]any {
 				},
 			},
 		},
+		// Every operation needs a session unless it declares security: [] (the middleware's public set).
+		"security": []any{map[string]any{"session": []string{}}},
 		"paths": map[string]any{
+			"/api/openapi.json": map[string]any{
+				"get": map[string]any{"tags": []string{"docs"}, "summary": "GET /api/openapi.json"},
+			},
+			"/ready": map[string]any{
+				"get": map[string]any{"tags": []string{"health"}, "summary": "GET /ready", "security": []any{}},
+			},
 			"/api/webhooks/line": map[string]any{
-				"post": map[string]any{"tags": []string{"webhook"}, "summary": "POST /api/webhooks/line"},
+				"post": map[string]any{"tags": []string{"webhook"}, "summary": "POST /api/webhooks/line", "security": []any{}},
 			},
 			"/api/v1/auth/status": map[string]any{
-				"get": map[string]any{"tags": []string{"auth"}, "summary": "GET /auth/status"},
+				"get": map[string]any{"tags": []string{"auth"}, "summary": "GET /auth/status", "security": []any{}},
 			},
 			"/api/v1/auth/setup": map[string]any{
-				"post": map[string]any{"tags": []string{"auth"}, "summary": "POST /auth/setup"},
+				"post": map[string]any{"tags": []string{"auth"}, "summary": "POST /auth/setup", "security": []any{}},
 			},
 			"/api/v1/auth/login": map[string]any{
-				"post": map[string]any{"tags": []string{"auth"}, "summary": "Verify password; issue a session or return mfaRequired with a pending attempt"},
+				"post": map[string]any{"tags": []string{"auth"}, "summary": "Verify password; issue a session or return mfaRequired with a pending attempt", "security": []any{}},
 			},
 			"/api/v1/auth/logout": map[string]any{
 				"post": map[string]any{"tags": []string{"auth"}, "summary": "POST /auth/logout"},
@@ -2193,8 +2300,8 @@ func openAPISpec() map[string]any {
 	paths := spec["paths"].(map[string]any)
 	for path, route := range securityPaths {
 		op := map[string]any{"tags": []string{"auth"}, "summary": route.summary}
-		if !route.public {
-			op["security"] = []any{map[string]any{"session": []string{}}}
+		if route.public {
+			op["security"] = []any{}
 		}
 		paths[secBase+path] = map[string]any{strings.ToLower(route.method): op}
 	}

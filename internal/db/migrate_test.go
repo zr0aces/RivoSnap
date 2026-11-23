@@ -9,6 +9,7 @@ import (
 
 	"rivosnap/internal/config"
 	"rivosnap/internal/db"
+	"rivosnap/internal/testguard"
 )
 
 func TestEmbeddedMigrationsChecksums(t *testing.T) {
@@ -33,9 +34,7 @@ func TestEmbeddedMigrationsChecksums(t *testing.T) {
 }
 
 func TestMigrationLifecycleIntegration(t *testing.T) {
-	if os.Getenv("GALLERY_INTEGRATION") == "" {
-		t.Skip("skipping migration integration test; set GALLERY_INTEGRATION=1")
-	}
+	testguard.Require(t)
 	ctx := context.Background()
 	env := config.Env{
 		DatabaseURL:        os.Getenv("DATABASE_URL"),
@@ -109,9 +108,7 @@ func TestMigrationLifecycleIntegration(t *testing.T) {
 }
 
 func TestSessionTimezoneIsUTC(t *testing.T) {
-	if os.Getenv("GALLERY_INTEGRATION") == "" {
-		t.Skip("skipping timezone integration test; set GALLERY_INTEGRATION=1")
-	}
+	testguard.Require(t)
 	ctx := context.Background()
 	database, err := db.Connect(ctx, config.Env{DatabaseURL: os.Getenv("DATABASE_URL")})
 	if err != nil {
@@ -128,9 +125,7 @@ func TestSessionTimezoneIsUTC(t *testing.T) {
 }
 
 func TestAllTimestampColumnsAreTimestamptz(t *testing.T) {
-	if os.Getenv("GALLERY_INTEGRATION") == "" {
-		t.Skip("skipping timestamptz integration test; set GALLERY_INTEGRATION=1")
-	}
+	testguard.Require(t)
 	ctx := context.Background()
 	database, err := db.Connect(ctx, config.Env{DatabaseURL: os.Getenv("DATABASE_URL")})
 	if err != nil {

@@ -449,6 +449,15 @@ func (s *Server) handleMFA(w http.ResponseWriter, r *http.Request, in securityIn
 }
 
 func (s *Server) handleChangeStart(w http.ResponseWriter, r *http.Request, in securityInput) error {
+	// The password check hashes under the gate. Take the slot before beginOwner locks the Owner row,
+	// so a request waiting for a slot never holds that lock. Passkey changes do not hash.
+	if in.Method != "passkey" {
+		release, ok := s.acquireHash(r.Context())
+		if !ok {
+			return errHashBusy
+		}
+		defer release()
+	}
 	t, err := s.beginOwner(r, true)
 	if err != nil {
 		return err
