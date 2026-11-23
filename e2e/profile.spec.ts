@@ -1,0 +1,131 @@
+import { createHmac } from "node:crypto";
+import { expect, test } from "@playwright/test";
+import { mockApi, normal } from "./fixtures";
+
+test("mobile Profile separates password MFA from passwordless passkeys", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await mockApi(page, normal);
+  await page.route("**/api/v1/profile", (route) =>
+    route.fulfill({
+      json: {
+        email: "owner@example.org",
+        passkeys: {},
+        totp: false,
+        recoveryRemaining: 0,
+      },
+    }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  await page.getByRole("link", { name: "Profile", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Profile", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Enable authenticator" }).click();
+  await expect(page.getByLabel("Current password")).toBeVisible();
+});
+
+// Explicit opt-in, fresh fixture account, localhost only. Never run against a live library.
+test("disposable owner enrolls TOTP and a discoverable passkey, then signs in without a password", async ({
+  page,
+  context,
+  browserName,
+  baseURL,
+}) => {
+  test.skip(
+    browserName !== "chromium" ||
+      process.env["E2E_PROFILE_FIXTURE"] !== "1" ||
+      !baseURL ||
+      new URL(baseURL).hostname !== "localhost",
+  );
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  const password = "temporary-profile-fixture",
+    email = "profile@example.org";
+  await page.goto("/profile");
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByLabel("Setup key").fill("disposable-profile-bootstrap-key");
+  await page.getByRole("button", { name: "Create owner account" }).click();
+  await page.getByRole("button", { name: "Add passkey" }).click();
+  await page.getByLabel("Passkey name").fill("Fixture phone");
+  await page.getByLabel("Current password").fill(password);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  const passkey = page.getByRole("button", { name: "Sign in with a passkey" });
+  await passkey.click();
+  await page.getByRole("button", { name: "Enable authenticator" }).click();
+  await page.getByLabel("Verify with").selectOption("passkey");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    page.getByAltText("Scan this QR code with your authenticator app"),
+  ).toBeVisible();
+  const secret = await page.locator("label code").innerText();
+  const bits = [...secret]
+    .map((x) =>
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+        .indexOf(x)
+        .toString(2)
+        .padStart(5, "0"),
+    )
+    .join("");
+  const key = Buffer.from(bits.match(/.{8}/g)!.map((x) => parseInt(x, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+  const digest = createHmac("sha1", key).update(counter).digest();
+  const code = String(
+    (digest.readUInt32BE(digest[19] & 15) & 0x7fffffff) % 1000000,
+  ).padStart(6, "0");
+  await page.getByLabel("First authenticator code").fill(code);
+  const recovery = await page.locator("li code").first().innerText();
+  await page.getByLabel("I saved these codes").check();
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+  await passkey.click();
+  await expect(page.getByText("8 unused recovery codes")).toBeVisible();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel("Authenticator or recovery code").fill(recovery);
+  await page.getByRole("button", { name: "Verify and sign in" }).click();
+  await page.getByRole("link", { name: "Profile", exact: true }).click();
+  await expect(page.getByText("7 unused recovery codes")).toBeVisible();
+  await page.getByRole("button", { name: "Replace recovery codes" }).click();
+  await page.getByLabel("Verify with").selectOption("passkey");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByLabel("I saved these codes").check();
+  const replacement = await page.locator("li code").first().innerText();
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  await passkey.click();
+  await page
+    .getByRole("button", { name: "Remove passkey: Fixture phone" })
+    .click();
+  await page.getByLabel("Verify with").selectOption("passkey");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  // The authenticator still holds its local credential, but the server no longer accepts it.
+  await passkey.click();
+  await expect(page.getByRole("alert")).not.toBeEmpty();
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel("Authenticator or recovery code").fill(replacement);
+  await page.getByRole("button", { name: "Verify and sign in" }).click();
+  await expect(page.getByText("7 unused recovery codes")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Remove passkey: Fixture phone" }),
+  ).toHaveCount(0);
+});

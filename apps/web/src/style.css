@@ -1623,3 +1623,11 @@ footer {
 .authState .button {
   min-height: 44px;
 }
+
+.profileSecurity {display:grid; gap:1rem; max-width:48rem;}
+.profileSecurity .panel {display:grid; justify-items:start; gap:.8rem; overflow-wrap:anywhere;}
+.profileSecurity h2,.profileSecurity p {margin:0;}
+.profileSecurity label {display:grid; gap:.4rem; max-width:100%;}
+.profileSecurity label:has(input[type=checkbox]) {display:flex;align-items:center;}
+.profileSecurity img {max-width:100%;height:auto;}
+.profileSecurity ul {padding-inline-start:1.3rem;}

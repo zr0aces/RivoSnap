@@ -59,6 +59,7 @@ function dataset(stressed: boolean) {
     mediaType: "VIDEO",
     mimeType: "video/mp4",
   });
+  images.forEach((image, index) => { image.dayNumber = images.length - index; });
   const jobs: Photo[] = [
     {
       ...images[stressed ? 2 : 0],

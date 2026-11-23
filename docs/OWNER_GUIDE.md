@@ -21,6 +21,16 @@ After sign-in, follow **Dashboard → Setup pipeline**. To revisit the checklist
 5. **Authorize the group.** Tell participants where their photos will be stored, then invite the Official Account to the LINE group. In RivoSnap, open **LINE groups**, find that group, and select **Enable collection**. Confirm the group shows **COLLECTING**. If it shows **LEFT**, invite the bot back before enabling it. Repeat for each group you want to collect from.
 6. **Send and verify one photo.** Send a **new image message** to the enabled group. Open **Upload queue** to follow unfinished work. A fast upload may leave the queue before you see it. Open **Gallery**, filter by group and **SYNCED**, and open the thumbnail. In Google Photos, confirm the same image is in **LINE - {Group Name}** (or **LINE - Group {short ID}** if the name was unavailable). The first upload creates the album; inviting the bot alone does not. Old messages and direct messages are not imported; videos are skipped unless **Collect videos** is enabled in **Settings → LINE Messaging API**.
 
+## Secure your owner account
+
+Open **Profile** (on mobile: **More → Profile**). The two sign-in methods are independent:
+
+- **Authenticator app:** select **Enable authenticator**, verify your identity, then scan the QR code in your authenticator or enter the manual key. Enter its six-digit code, save the eight recovery codes somewhere private and offline, and confirm. Your password now requires a fresh authenticator code or one unused recovery code. If you just used a code, wait for the next one.
+- **Passwordless passkey:** select **Add passkey**, give the device a recognizable name, verify your identity, and confirm using the device prompt. Next time select **Sign in with a passkey** before entering any email or password. A passkey does not enable MFA for password login. If you cancel the prompt, you can still choose the password form.
+- **Lost device:** use another registered passkey, or your password plus a recovery code if authenticator MFA is enabled. Remove the lost passkey from Profile. Use **Replace recovery codes** to invalidate the old set only after you save and confirm its replacement. To replace an authenticator, use **Replace authenticator**. Your existing app and recovery codes remain active until the replacement is confirmed. The initial setup key cannot unlock an existing account.
+
+Security changes require fresh verification and sign out all sessions. Keep an independent sign-in method before removing a device. Use the same public HTTPS hostname across devices.
+
 ## Manage collection
 
 | When you want to… | What to do |

@@ -24,6 +24,8 @@ A fresh Go installation applies the same checked-in SQL and records the same mig
 
 ## Operations
 
+**Upgrading to owner MFA and passkeys:** Keep the existing `APP_URL` hostname and `TOKEN_ENCRYPTION_KEY`; no new environment variables are required. Existing sessions must sign in again after this upgrade. Replace all password-only API instances before owners enroll. See [owner authentication changes](SECURITY.md#owner-authentication-changes).
+
 Upgrading from a build without the UTC session fix: follow [One-off UTC timestamp repair](TROUBLESHOOTING.md#one-off-utc-timestamp-repair) before starting the new images; `pull` + `up -d` alone migrates the columns and closes the repair window.
 
 ```sh
@@ -58,6 +60,6 @@ docker compose exec -T postgres createdb -U gallery gallery_recovery
 docker compose exec -T postgres pg_restore -U gallery -d gallery_recovery --exit-on-error < gallery.dump
 ```
 
-A database backup contains **metadata, passwords hashes, encrypted credentials, outbox and audit state, not original image backups**. Keep its separate application encryption key secure. Redis is transport, not the recovery authority. Thumbnails are never backups.
+A database backup contains **metadata, password hashes, passkey public credentials, recovery-code hashes, encrypted authenticator seeds and provider credentials, outbox and audit state, not original image backups**. Keep its separate application encryption key secure. Redis is transport, not the recovery authority. Thumbnails are never backups.
 
-For a coordinated recovery point stop API and worker before the dump and retain existing staging volumes. Do not point a live worker at a restored database until the operator has reconciled every remote write since the snapshot, especially album mappings and nonterminal images. Restoring older state alone can cause duplicates or lose track of newer Google media. Test restoration on an isolated host, then update DATABASE_URL to the verified database and restart; retain the former database for rollback. For application-only rollback use the prior image tags with the compatible expanded schema.
+For a coordinated recovery point stop API and worker before the dump and retain existing staging volumes. Do not point a live worker at a restored database until the operator has reconciled every remote write since the snapshot, especially album mappings and nonterminal images. Restoring older state alone can cause duplicates or lose track of newer Google media. Test restoration on an isolated host, then update DATABASE_URL to the verified database and restart; retain the former database for rollback. A database restore also restores the sign-in methods and recovery-code hashes present at backup time. Review those methods and replace recovery codes before reopening access. For application rollback, the prior API must enforce all enrolled methods; schema compatibility alone is insufficient. If it does not, keep the API offline and fix forward.

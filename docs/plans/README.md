@@ -4,6 +4,7 @@ Add a link under **Active** when a plan is created; move it to **Completed** whe
 
 ## Active
 
+- [Owner Profile: authenticator app and passkeys](2026-11-23-owner-profile-mfa.md) — Implemented; physical-device HTTPS smoke check remains before release.
 - [Mobile bottom navigation and More sheet](2026-11-22-mobile-bottom-navigation.md) — Keep family browsing one tap away and move management actions into an accessible mobile sheet.
 
 ## Completed

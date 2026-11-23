@@ -30,4 +30,6 @@ If `rivosnap-api` fails its healthcheck on first boot, inspect `docker compose -
 
 Sign in through your HTTPS URL and confirm the sidebar/Health version matches the image tag. To inspect the embedded release, run `docker compose -f compose.yml exec api cat /app/VERSION` (also available in `worker`; `web` is stock Nginx without `/app/VERSION`). No host version file or release variable is required.
 
+Owner passkeys and authenticator MFA are enrolled in **Profile**, not in the environment file. Keep the HTTPS hostname stable for passkeys. After enrollment, do not roll back to a password-only API: it would ignore MFA.
+
 For upgrades, back up the database, encryption key, and pending originals, and check migration compatibility. Preserve the private `.env`, project name, and named volumes. Pull the new release images, stop the worker before migrations, then start the stack. Never use `down -v` during an upgrade.

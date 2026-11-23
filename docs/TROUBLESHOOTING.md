@@ -3,6 +3,8 @@
 | Symptom | Operator action |
 |---|---|
 | Setup denied | Use the deployment's bootstrap key only for first claim. If an owner exists, sign in. A mismatched APP_URL or proxy rewriting Origin blocks browser writes. |
+| Passkey unavailable or not found | Open the exact HTTPS `APP_URL` in a supported browser and choose a device or password manager holding a registered passkey. If the hostname changed, use password sign-in and enroll a new passkey. Enrolled authenticator MFA still applies to passwords. |
+| Authenticator code rejected or phone lost | Check that the phone and server clocks are synchronized and try the next code, not one already used. If the attempt expired, restart sign-in. Use a registered passkey or your password plus an unused recovery code, then [replace the lost method in Profile](OWNER_GUIDE.md#secure-your-owner-account). |
 | Webhook Verify fails | Check public TLS, exact URL, unmodified body and matching channel secret. Enable redelivery. A full staging disk returns a temporary error rather than dropping images. |
 | Missing group | Enable LINE group participation and invite the correct Official Account. Direct messages and rooms never register. An already joined group can be discovered by a new group image but stays disabled. |
 | No image after enabling | Send a **new image** after enablement. Check membership, configuration and worker heartbeat. LINE_404/410 means content is no longer available; sending a new image is required. |

@@ -103,14 +103,15 @@ test("More sheet lifecycle, keyboard trap, focus/scroll restoration, history, an
   await expect(closeBtn).toBeFocused();
   expect(await page.evaluate(() => history.length)).toBe(initialHistoryLen);
 
-  // Verify all 4 sheet links in order and active state on Settings
+  // Verify all 5 sheet links in order and active state on Settings
   const sheetLinks = dialog.locator(".moreSheetLinks a");
-  await expect(sheetLinks).toHaveCount(4);
+  await expect(sheetLinks).toHaveCount(5);
   await expect(sheetLinks).toHaveText([
     /Upload queue/,
     /LINE groups/,
     /System health/,
     /Settings/,
+    /Profile/,
   ]);
   await expect(sheetLinks.nth(3)).toHaveAttribute("aria-current", "page");
 
@@ -360,6 +361,12 @@ for (const auth of ["setup", "login"] as const) {
       "password",
       ...(auth === "setup" ? ["bootstrap"] : []),
     ];
+    const passkey = form.getByRole("button", { name: "Sign in with a passkey" });
+    if (auth === "login" && await passkey.isEnabled()) {
+      await page.keyboard.press("Tab");
+      await expect(passkey).toBeFocused();
+      await expectHitTarget(passkey);
+    }
     for (const [index, input] of (await inputs.all()).entries()) {
       await page.keyboard.press("Tab");
       await expect(input).toBeFocused();
@@ -368,7 +375,7 @@ for (const auth of ["setup", "login"] as const) {
         await input.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
       ).toBeGreaterThanOrEqual(16);
     }
-    const submit = form.getByRole("button");
+    const submit = form.getByRole("button", {name: auth === "login" ? "Sign in" : "Create owner account", exact:true});
     await page.keyboard.press("Tab");
     await expect(submit).toBeFocused();
     await expectHitTarget(submit);
@@ -443,6 +450,6 @@ test("auth error, missing route and sign-out failure offer keyboard recovery", a
   );
   await expect(signOut).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   expect(attempts).toBe(2);
 });
