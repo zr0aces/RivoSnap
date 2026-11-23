@@ -25,13 +25,15 @@ After sign-in, follow **Dashboard → Setup pipeline**. To revisit the checklist
 
 Open **Profile** (on mobile: **More → Profile**). The two sign-in methods are independent:
 
-- **Authenticator app:** select **Enable authenticator**, verify your identity, then scan the QR code in your authenticator or enter the manual key. Enter its six-digit code, save the eight recovery codes somewhere private and offline, and confirm. Your password now requires a fresh authenticator code or one unused recovery code. If you just used a code, wait for the next one.
+- **Authenticator app:** select **Enable authenticator**, verify your identity, then scan the QR code in your authenticator or enter the manual key. Enter its six-digit code, save the eight recovery codes somewhere private and offline, and confirm. Your password now requires a fresh authenticator code or one unused recovery code. If you just used a code, wait for the next one. **Replace authenticator** also issues a new set of recovery codes, and the old set stops working after you confirm the change. Recovery codes are accepted in any letter case and ignore spaces and hyphens.
 - **Passwordless passkey:** select **Add passkey**, give the device a recognizable name, verify your identity, and confirm using the device prompt. Next time select **Sign in with a passkey** before entering any email or password. A passkey does not enable MFA for password login. If you cancel the prompt, you can still choose the password form.
 - **Lost device:** use another registered passkey, or your password plus a recovery code if authenticator MFA is enabled. Remove the lost passkey from Profile. Use **Replace recovery codes** to invalidate the old set only after you save and confirm its replacement. To replace an authenticator, use **Replace authenticator**. Your existing app and recovery codes remain active until the replacement is confirmed. The initial setup key cannot unlock an existing account.
 
 Security changes require fresh verification and sign out all sessions. Keep an independent sign-in method before removing a device. Use the same public HTTPS hostname across devices.
 
 ## Manage collection
+
+**Dashboard → Media activity** shows today and the previous six Bangkok dates. Images and videos are counted by their LINE event date; uploads are counted on the day they finish in Google Photos. Open **Daily counts and upload breakdown** for exact image and video totals.
 
 | When you want to… | What to do |
 |---|---|

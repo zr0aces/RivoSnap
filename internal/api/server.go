@@ -402,6 +402,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/v1/jobs/{id}/discard", s.handleDiscardJob)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/retry", s.handleRetryJob)
+	mux.HandleFunc("GET /api/v1/dashboard/activity", s.handleDashboardActivity)
 	mux.HandleFunc("GET /api/v1/dashboard/stats", s.handleDashboardStats)
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", newSPAHandler(web.Dist()))
@@ -545,17 +546,27 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request, mode string)
 			return
 		}
 	}
-	s.issueSession(w, r, rev)
+	sid, err := s.newSession(ctx, rev)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	s.setSessionCookie(w, sid)
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
-func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, rev int64) {
-	ctx := r.Context()
+
+// newSession stores a session for revision rev and returns its id. The id reaches the browser only through setSessionCookie.
+func (s *Server) newSession(ctx context.Context, rev int64) (string, error) {
 	sidBytes := make([]byte, 32)
 	_, _ = rand.Read(sidBytes)
 	sid := hex.EncodeToString(sidBytes)
 	if err := s.Redis.Set(ctx, "session:"+sid, sessionValue(rev), 43200*time.Second).Err(); err != nil {
-		writeErr(w, err)
-		return
+		return "", err
 	}
+	return sid, nil
+}
+
+func (s *Server) setSessionCookie(w http.ResponseWriter, sid string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    crypto.SignCookie(sid, s.Env.SessionSecret),
@@ -565,7 +576,6 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, rev int64)
 		Secure:   s.Env.NodeEnv == "production",
 		MaxAge:   43200,
 	})
-	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -2171,6 +2181,9 @@ func openAPISpec() map[string]any {
 			},
 			"/api/v1/jobs/{id}/retry": map[string]any{
 				"post": map[string]any{"tags": []string{"jobs"}, "summary": "POST /jobs/:id/retry"},
+			},
+			"/api/v1/dashboard/activity": map[string]any{
+				"get": map[string]any{"tags": []string{"dashboard"}, "summary": "Daily media received and uploaded by type, last seven Bangkok dates"},
 			},
 			"/api/v1/dashboard/stats": map[string]any{
 				"get": map[string]any{"tags": []string{"dashboard"}, "summary": "GET /dashboard/stats"},

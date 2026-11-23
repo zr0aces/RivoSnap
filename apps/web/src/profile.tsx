@@ -46,7 +46,7 @@ export async function passkeyLogin() {
 }
 export function Profile() {
   const profile = query<Summary>("/profile");
-  const [selection, select] = useState<{
+  const [selection, setSelection] = useState<{
     action: Action;
     target: string;
   } | null>(null);
@@ -74,7 +74,7 @@ export function Profile() {
             <ChangeForm
               owner={owner}
               {...selection}
-              close={() => select(null)}
+              close={() => setSelection(null)}
             />
           ) : (
             <>
@@ -88,7 +88,7 @@ export function Profile() {
                 <Button
                   variant="secondary"
                   onClick={() =>
-                    select({
+                    setSelection({
                       action: owner.totp ? "disable" : "enable",
                       target: "",
                     })
@@ -100,7 +100,7 @@ export function Profile() {
                   <>
                     <Button
                       variant="secondary"
-                      onClick={() => select({ action: "replace", target: "" })}
+                      onClick={() => setSelection({ action: "replace", target: "" })}
                     >
                       {actions.replace}
                     </Button>
@@ -108,7 +108,7 @@ export function Profile() {
                     <Button
                       variant="secondary"
                       onClick={() =>
-                        select({ action: "regenerate", target: "" })
+                        setSelection({ action: "regenerate", target: "" })
                       }
                     >
                       {actions.regenerate}
@@ -128,7 +128,7 @@ export function Profile() {
                     <Button
                       variant="ghost"
                       aria-label={actions.remove + ": " + name}
-                      onClick={() => select({ action: "remove", target: id })}
+                      onClick={() => setSelection({ action: "remove", target: id })}
                     >
                       Remove
                     </Button>
@@ -137,7 +137,7 @@ export function Profile() {
                 <Button
                   disabled={!passkeyAvailable()}
                   variant="secondary"
-                  onClick={() => select({ action: "add", target: "" })}
+                  onClick={() => setSelection({ action: "add", target: "" })}
                 >
                   Add passkey
                 </Button>
@@ -166,15 +166,15 @@ function ChangeForm({
   close: () => void;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null),
-    [busy, lock] = useState(false),
-    [error, fail] = useState("");
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
   const [method, setMethod] = useState("password");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget,
       fields = new FormData(form);
-    lock(true);
-    fail("");
+    setBusy(true);
+    setError("");
     try {
       if (!preview) {
         const input = {
@@ -213,14 +213,14 @@ function ChangeForm({
         window.location.assign("/profile");
       }
     } catch (e) {
-      fail((e as Error).message);
+      setError((e as Error).message);
       if (
         preview &&
         !(e instanceof ApiError && e.status === 400 && preview.secret)
       )
         setPreview(null);
     } finally {
-      lock(false);
+      setBusy(false);
     }
   }
   return (
@@ -341,13 +341,13 @@ function ChangeForm({
           variant="ghost"
           disabled={busy}
           onClick={async () => {
-            lock(true);
+            setBusy(true);
             try {
               await api("/auth/cancel", "POST");
               close();
             } catch (e) {
-              fail((e as Error).message);
-              lock(false);
+              setError((e as Error).message);
+              setBusy(false);
             }
           }}
         >

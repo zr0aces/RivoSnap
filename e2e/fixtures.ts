@@ -142,6 +142,12 @@ export async function mockApi(
         diskPressure: false,
         workerLastProgressAt: timestamp,
       },
+      "/profile": {
+        email: "owner@example.org",
+        totp: false,
+        passkeys: { "fixture-passkey": longName },
+        recoveryRemaining: 0,
+      },
     };
     return path in values
       ? route.fulfill({ json: values[path] })

@@ -219,9 +219,9 @@ function Login({ setup }: { setup: boolean }) {
     bootstrap: string;
   }>();
   const [error, set] = useState("");
-  const [mfa, step] = useState(false),
+  const [mfaPending, setMfaPending] = useState(false),
     [code, setCode] = useState(""),
-    [busy, lock] = useState(false);
+    [busy, setBusy] = useState(false);
   return (
     <main className="entry">
       <div className="entrySide">
@@ -234,8 +234,8 @@ function Login({ setup }: { setup: boolean }) {
             One contact sheet.
           </h1>
           <p>
-            A private home for the photos your LINE groups send to Google Photos
-            — staged safely, never silently dropped.
+            A private home for the photos your LINE groups send to Google
+            Photos — staged safely, never silently dropped.
           </p>
         </div>
         <div className="contactMotif" aria-hidden="true">
@@ -250,20 +250,21 @@ function Login({ setup }: { setup: boolean }) {
       </div>
       <form
         onSubmit={
-          mfa
+          mfaPending
             ? async (event) => {
                 event.preventDefault();
-                lock(true);
+                setBusy(true);
                 set("");
                 try {
                   await api("/auth/mfa", "POST", { code });
                   await client.invalidateQueries();
                 } catch (e) {
                   set((e as Error).message);
-                  if (e instanceof ApiError && e.status === 410) step(false);
+                  if (e instanceof ApiError && (e.status === 410 || e.status === 429))
+                    setMfaPending(false);
                 } finally {
                   setCode("");
-                  lock(false);
+                  setBusy(false);
                 }
               }
             : handleSubmit(async (data) => {
@@ -276,7 +277,7 @@ function Login({ setup }: { setup: boolean }) {
                   );
                   if (result.mfaRequired) {
                     reset();
-                    step(true);
+                    setMfaPending(true);
                     return;
                   }
                   await client.invalidateQueries();
@@ -291,7 +292,7 @@ function Login({ setup }: { setup: boolean }) {
         {setup && (
           <p>Use the setup key from your deployment to claim this library.</p>
         )}
-        {mfa ? (
+        {mfaPending ? (
           <>
             <label>
               Authenticator or recovery code
@@ -311,7 +312,7 @@ function Login({ setup }: { setup: boolean }) {
               onClick={async () => {
                 try {
                   await api("/auth/cancel", "POST");
-                  step(false);
+                  setMfaPending(false);
                   setCode("");
                   set("");
                 } catch (e) {
@@ -333,7 +334,7 @@ function Login({ setup }: { setup: boolean }) {
                     busy || formState.isSubmitting || !passkeyAvailable()
                   }
                   onClick={async () => {
-                    lock(true);
+                    setBusy(true);
                     set("");
                     try {
                       await passkeyLogin();
@@ -344,7 +345,7 @@ function Login({ setup }: { setup: boolean }) {
                       } catch {}
                       set((e as Error).message);
                     } finally {
-                      lock(false);
+                      setBusy(false);
                     }
                   }}
                 >
@@ -431,8 +432,7 @@ function CompactShellNav({
 
   const descParts: string[] = [];
   if (queueSummary.text) descParts.push(`Upload queue: ${queueSummary.text}`);
-  if (healthSummary.text)
-    descParts.push(`System health: ${healthSummary.text}`);
+  if (healthSummary.text) descParts.push(`System health: ${healthSummary.text}`);
   const moreDesc = descParts.join("; ");
 
   useLayoutEffect(() => {
@@ -493,7 +493,12 @@ function CompactShellNav({
     <>
       <nav ref={barRef} className="mobileNav" aria-label="Primary">
         {compactPrimary.map(([label, to, Icon]) => (
-          <NavLink key={to} end={to === "/"} to={to} className="mobileNavItem">
+          <NavLink
+            key={to}
+            end={to === "/"}
+            to={to}
+            className="mobileNavItem"
+          >
             <span className="mobileNavIconWrap">
               <Icon size={18} aria-hidden="true" />
             </span>
@@ -589,9 +594,7 @@ function CompactShellNav({
                   <Icon size={18} aria-hidden="true" />
                   <span>{labels[k]}</span>
                   {rowStatus && (
-                    <span
-                      className={"moreRowMeta" + (rowAlarm ? " alarm" : "")}
-                    >
+                    <span className={"moreRowMeta" + (rowAlarm ? " alarm" : "")}>
                       {rowStatus}
                     </span>
                   )}

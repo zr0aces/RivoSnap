@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"crypto/rand"
-
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
@@ -21,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 	qr "github.com/skip2/go-qrcode"
+
 	"rivosnap/internal/crypto"
 )
 
@@ -41,14 +41,48 @@ func (s *Server) sessionRevision(r *http.Request, sid string) (int64, bool, erro
 	}
 	var rev int64
 	e = s.DB.Pool.QueryRow(ctx, `SELECT "securityRevision" FROM "Owner" WHERE id=1`).Scan(&rev)
+	if errors.Is(e, pgx.ErrNoRows) {
+		// No owner row means no owner is signed in; anonymous, not an error.
+		return 0, false, nil
+	}
 	return rev, e == nil && v == sessionValue(rev), e
 }
 
+type action string
+
+const (
+	enable     action = "enable"
+	disable    action = "disable"
+	replace    action = "replace"
+	regenerate action = "regenerate"
+	add        action = "add"
+	remove     action = "remove"
+)
+
+type purpose string
+
+const (
+	login  purpose = "login"
+	mfa    purpose = "mfa"
+	prove  purpose = "prove"
+	finish purpose = "finish"
+)
+
+// rotates lists the actions that replace a factor and must show the owner new material.
+var rotates = map[action]struct{ seed, codes bool }{
+	enable:     {seed: true, codes: true},
+	replace:    {seed: true, codes: true},
+	regenerate: {codes: true},
+}
+
 type flow struct {
-	Purpose, SID, Action, Target, Seed, Confirmation string
-	Revision                                         int64
-	Hashes                                           []string
-	Web                                              wa.SessionData
+	Purpose                          purpose
+	SID                              string
+	Action                           action
+	Target, SealedSeed, Confirmation string
+	Revision                         int64
+	RecoveryHashes                   []string
+	Web                              wa.SessionData
 }
 
 const flowCookie = "owner_attempt"
@@ -89,19 +123,13 @@ func (s *Server) saveFlow(w http.ResponseWriter, r *http.Request, f flow) error 
 	http.SetCookie(w, &http.Cookie{Name: flowCookie, Value: token, Path: "/api/v1/", HttpOnly: true, Secure: s.Env.NodeEnv == "production", SameSite: http.SameSiteStrictMode, MaxAge: 300})
 	return nil
 }
-func (s *Server) loadFlow(r *http.Request, purpose string, consume bool) (flow, error) {
+func (s *Server) loadFlow(r *http.Request, want purpose, consume bool) (flow, error) {
 	var f flow
 	k := flowKey(r)
 	if k == "" {
 		return f, expired
 	}
-	var b []byte
-	var e error
-	if consume {
-		b, e = s.Redis.GetDel(r.Context(), k).Bytes()
-	} else {
-		b, e = s.Redis.Get(r.Context(), k).Bytes()
-	}
+	b, e := s.Redis.Get(r.Context(), k).Bytes()
 	if errors.Is(e, redis.Nil) {
 		return f, expired
 	}
@@ -111,23 +139,35 @@ func (s *Server) loadFlow(r *http.Request, purpose string, consume bool) (flow, 
 	if e = json.Unmarshal(b, &f); e != nil {
 		return f, e
 	}
-	if f.Purpose != purpose || (f.SID != "" && s.sid(r) != f.SID) {
+	// A stray request for another purpose must not destroy the pending attempt.
+	if f.Purpose != want || (f.SID != "" && s.sid(r) != f.SID) {
 		return f, expired
+	}
+	if consume {
+		// Only one concurrent request can delete the key and see a count of 1.
+		n, e := s.Redis.Del(r.Context(), k).Result()
+		if e != nil {
+			return f, e
+		}
+		if n != 1 {
+			return f, expired
+		}
 	}
 	return f, nil
 }
 
 type securityInput struct {
-	Action, Target, Password, Code, Method, Confirmation string
-	Saved                                                bool
-	Credential                                           json.RawMessage
+	Action                                       action
+	Target, Password, Code, Method, Confirmation string
+	Saved                                        bool
+	Credential                                   json.RawMessage
 }
 type securityOwner struct {
-	email, password, handle, seed string
-	rev, step                     int64
-	hashes                        []string
-	keys                          []wa.Credential
-	names                         map[string]string
+	email, passwordHash, handle, sealedSeed string
+	rev, totpStep                           int64
+	recoveryHashes                          []string
+	keys                                    []wa.Credential
+	names                                   map[string]string
 }
 
 func (o *securityOwner) WebAuthnID() []byte                   { return []byte(o.handle) }
@@ -135,10 +175,14 @@ func (o *securityOwner) WebAuthnName() string                 { return o.email }
 func (o *securityOwner) WebAuthnDisplayName() string          { return o.email }
 func (o *securityOwner) WebAuthnCredentials() []wa.Credential { return o.keys }
 
-func loadOwner(r *http.Request, tx pgx.Tx) (*securityOwner, error) {
+func loadOwner(r *http.Request, tx pgx.Tx, lock bool) (*securityOwner, error) {
 	ctx := r.Context()
 	o := &securityOwner{names: map[string]string{}}
-	err := tx.QueryRow(ctx, `SELECT email,"passwordHash","passkeyHandle"::text,"securityRevision","totpSecret","totpStep","recoveryHashes" FROM "Owner" WHERE id=1 FOR UPDATE`).Scan(&o.email, &o.password, &o.handle, &o.rev, &o.seed, &o.step, &o.hashes)
+	query := `SELECT email,"passwordHash","passkeyHandle"::text,"securityRevision","totpSecret","totpStep","recoveryHashes" FROM "Owner" WHERE id=1`
+	if lock {
+		query += " FOR UPDATE"
+	}
+	err := tx.QueryRow(ctx, query).Scan(&o.email, &o.passwordHash, &o.handle, &o.rev, &o.sealedSeed, &o.totpStep, &o.recoveryHashes)
 	if err != nil {
 		return nil, err
 	}
@@ -186,214 +230,337 @@ func credentialRequest(r *http.Request, b []byte) *http.Request {
 	c.Body = io.NopCloser(bytes.NewReader(b))
 	return c
 }
-func (s *Server) assert(r *http.Request, tx pgx.Tx, o *securityOwner, f flow, b []byte) error {
-	v, e := s.verifier()
+func (t *ownerTx) assert(f flow, b []byte) error {
+	v, e := t.s.verifier()
 	if e != nil {
 		return e
 	}
 	_, c, e := v.FinishPasskeyLogin(func(id, handle []byte) (wa.User, error) {
-		if !bytes.Equal(handle, o.WebAuthnID()) {
+		if !bytes.Equal(handle, t.WebAuthnID()) {
 			return nil, rejected
 		}
-		if _, ok := o.names[keyID(id)]; !ok {
+		if _, ok := t.names[keyID(id)]; !ok {
 			return nil, rejected
 		}
-		return o, nil
-	}, f.Web, credentialRequest(r, b))
+		return t.securityOwner, nil
+	}, f.Web, credentialRequest(t.r, b))
 	if e != nil || c.Authenticator.CloneWarning {
 		return rejected
 	}
-	_, e = tx.Exec(r.Context(), `UPDATE "OwnerPasskey" SET credential=$1 WHERE id=$2`, c, c.ID)
+	_, e = t.tx.Exec(t.r.Context(), `UPDATE "OwnerPasskey" SET credential=$1 WHERE id=$2`, c, c.ID)
 	return e
 }
 
 const secBase = "/api/v1/"
 
 // Only explicitly public operations may run before full owner authentication.
+// rated operations share the auth rate bucket; handle does one route's work.
 type securityOperation struct {
 	method, summary string
-	public          bool
+	public, rated   bool
+	handle          func(*Server, http.ResponseWriter, *http.Request, securityInput) error
 }
 
 var securityPaths = map[string]securityOperation{
-	"profile":             {"GET", "Read owner email, enrolled methods and unused recovery-code count", false},
-	"profile/start":       {"POST", "Bind fresh verification to a named security change and target", false},
-	"profile/prove":       {"POST", "Verify the existing passkey assertion for a pending security change", false},
-	"profile/finish":      {"POST", "Confirm a prepared change and revoke previous sessions", false},
-	"auth/passkey/start":  {"POST", "Begin passwordless discoverable passkey sign-in", true},
-	"auth/passkey/finish": {"POST", "Verify a user-verified assertion and issue the owner session", true},
-	"auth/mfa":            {"POST", "Complete a pending password login with TOTP or a recovery code", true},
-	"auth/cancel":         {"POST", "Cancel the browser's pending verification without changing the account", true},
+	"profile":             {method: "GET", summary: "Read owner email, enrolled methods and unused recovery-code count", handle: (*Server).handleProfile},
+	"profile/start":       {method: "POST", summary: "Bind fresh verification to a named security change and target", rated: true, handle: (*Server).handleChangeStart},
+	"profile/prove":       {method: "POST", summary: "Verify the existing passkey assertion for a pending security change", rated: true, handle: (*Server).handleChangeProve},
+	"profile/finish":      {method: "POST", summary: "Confirm a prepared change and revoke previous sessions", rated: true, handle: (*Server).handleChangeFinish},
+	"auth/passkey/start":  {method: "POST", summary: "Begin passwordless discoverable passkey sign-in", public: true, rated: true, handle: (*Server).handlePasskeyStart},
+	"auth/passkey/finish": {method: "POST", summary: "Verify a user-verified assertion and issue the owner session", public: true, rated: true, handle: (*Server).handlePasskeyFinish},
+	"auth/mfa":            {method: "POST", summary: "Complete a pending password login with TOTP or a recovery code", public: true, rated: true, handle: (*Server).handleMFA},
+	"auth/cancel":         {method: "POST", summary: "Cancel the browser's pending verification without changing the account", public: true, handle: (*Server).handleCancel},
 }
 
 func publicSecurityRoute(method, path string) bool {
 	op := securityPaths[strings.TrimPrefix(path, secBase)]
 	return op.public && op.method == method
 }
+
+// securityRoutes is the only shared prelude: parse the body, apply the rate limit, then run the route.
 func (s *Server) securityRoutes(m *http.ServeMux) {
 	for path, op := range securityPaths {
 		m.HandleFunc(op.method+" "+secBase+path, func(w http.ResponseWriter, r *http.Request) {
-			if err := s.securityRequest(w, r, path); err != nil {
+			var in securityInput
+			if r.Method == "POST" {
+				raw, err := readBody(r)
+				if err != nil {
+					writeErr(w, err)
+					return
+				}
+				if len(raw) > 0 && json.Unmarshal(raw, &in) != nil {
+					writeErr(w, errBadRequest("Invalid request."))
+					return
+				}
+			}
+			if op.rated && !s.checkRate(s.authRates, path+":"+clientHost(r), 8, 5*time.Minute) {
+				writeErr(w, &httpError{429, "Too many attempts. Try again later."})
+				return
+			}
+			if err := op.handle(s, w, r, in); err != nil {
 				writeErr(w, err)
 			}
 		})
 	}
 }
-func (s *Server) securityRequest(w http.ResponseWriter, r *http.Request, path string) error {
+
+// ownerTx is the owner transaction one security route works inside.
+type ownerTx struct {
+	s  *Server
+	r  *http.Request
+	tx pgx.Tx
+	*securityOwner
+}
+
+// beginOwner starts a transaction, loads the owner and applies the session revision check.
+// lock=true takes the singleton owner row lock for a proof or change; lock=false is a read-only snapshot.
+// On error the transaction is already rolled back; on success the caller rolls back unless it commits.
+func (s *Server) beginOwner(r *http.Request, lock bool) (*ownerTx, error) {
 	ctx := r.Context()
-	var in securityInput
-	if r.Method == "POST" {
-		raw, e := readBody(r)
-		if e != nil {
-			return e
-		}
-		if len(raw) > 0 && json.Unmarshal(raw, &in) != nil {
-			return errBadRequest("Invalid request.")
-		}
+	opts := pgx.TxOptions{AccessMode: pgx.ReadOnly, IsoLevel: pgx.RepeatableRead}
+	if lock {
+		opts = pgx.TxOptions{}
 	}
-	if path == "auth/cancel" {
-		if e := s.cancelFlow(r); e != nil {
-			return e
-		}
-		writeJSON(w, 200, map[string]bool{"ok": true})
-		return nil
+	tx, err := s.DB.Pool.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
 	}
-	if path != "profile" && !s.checkRate(s.authRates, path+":"+clientHost(r), 8, 5*time.Minute) {
-		return &httpError{429, "Too many attempts. Try again later."}
-	}
-	if path == "auth/passkey/start" {
-		var rev int64
-		err := s.DB.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT "securityRevision" FROM "Owner" WHERE id=1),0)`).Scan(&rev)
-		if err != nil {
-			return err
-		}
-		out, e := s.beginAssertion(w, r, flow{Purpose: "login", Revision: rev})
-		if e != nil {
-			return e
-		}
-		writeJSON(w, 200, out)
-		return nil
-	}
-	purpose := map[string]string{"auth/passkey/finish": "login", "auth/mfa": "mfa", "profile/prove": "prove", "profile/finish": "finish"}[path]
-	retry := purpose == "mfa" || purpose == "finish"
-	var pending flow
-	if purpose != "" {
-		var err error
-		pending, err = s.loadFlow(r, purpose, !retry)
-		if err != nil {
-			return err
-		}
-		if retry && !s.checkRate(s.authRates, flowKey(r), 5, 5*time.Minute) {
-			return expired
-		}
-	}
-	tx, e := s.DB.Pool.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	o, e := loadOwner(r, tx)
-	if e != nil {
-		return e
+	o, err := loadOwner(r, tx, lock)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
 	}
 	if rev, ok := ctx.Value(revisionContextKey{}).(int64); ok && rev != o.rev {
+		_ = tx.Rollback(ctx)
+		return nil, expired
+	}
+	return &ownerTx{s: s, r: r, tx: tx, securityOwner: o}, nil
+}
+
+// exhausted is an attempt that used its wrong-code budget; its flow is deleted, so the browser must restart.
+var exhausted = &httpError{429, "Too many incorrect attempts. Start sign-in again."}
+
+// pendingFlow loads the attempt for want. Retried purposes keep the flow until success and are limited per attempt.
+func (s *Server) pendingFlow(r *http.Request, want purpose, retry bool) (flow, error) {
+	f, err := s.loadFlow(r, want, !retry)
+	if err != nil {
+		return f, err
+	}
+	if retry && !s.checkRate(s.authRates, flowKey(r), 5, 5*time.Minute) {
+		_ = s.cancelFlow(r)
+		return f, exhausted
+	}
+	return f, nil
+}
+
+// completeLogin creates the session before commit, so a session-store failure rolls back the proof
+// and the recovery code or TOTP step stays usable. The cookie is set only after the commit succeeds.
+func (s *Server) completeLogin(w http.ResponseWriter, t *ownerTx) error {
+	ctx := t.r.Context()
+	sid, err := s.newSession(ctx, t.rev)
+	if err != nil {
+		return err
+	}
+	if err := t.tx.Commit(ctx); err != nil {
+		// Best effort: the id is unreachable without a cookie and expires after 12 hours.
+		_ = s.Redis.Del(ctx, "session:"+sid).Err()
+		return err
+	}
+	s.setSessionCookie(w, sid)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+	return nil
+}
+
+func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request, _ securityInput) error {
+	if err := s.cancelFlow(r); err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+	return nil
+}
+
+func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request, _ securityInput) error {
+	t, err := s.beginOwner(r, false)
+	if err != nil {
+		return err
+	}
+	defer t.tx.Rollback(r.Context())
+	out := map[string]any{"email": t.email, "totp": t.sealedSeed != "", "passkeys": t.names, "recoveryRemaining": len(t.recoveryHashes)}
+	if err := t.tx.Commit(r.Context()); err != nil {
+		return err
+	}
+	writeJSON(w, 200, out)
+	return nil
+}
+
+func (s *Server) handlePasskeyStart(w http.ResponseWriter, r *http.Request, _ securityInput) error {
+	var rev int64
+	err := s.DB.Pool.QueryRow(r.Context(), `SELECT COALESCE((SELECT "securityRevision" FROM "Owner" WHERE id=1),0)`).Scan(&rev)
+	if err != nil {
+		return err
+	}
+	out, err := s.beginAssertion(w, r, flow{Purpose: login, Revision: rev})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, out)
+	return nil
+}
+
+func (s *Server) handlePasskeyFinish(w http.ResponseWriter, r *http.Request, in securityInput) error {
+	pending, err := s.pendingFlow(r, login, false)
+	if err != nil {
+		return err
+	}
+	t, err := s.beginOwner(r, true)
+	if err != nil {
+		return err
+	}
+	defer t.tx.Rollback(r.Context())
+	if pending.Revision != t.rev {
 		return expired
 	}
-	var out any = map[string]bool{"ok": true}
-	login := false
-	var change *flow
-	switch path {
-	case "profile":
-		out = map[string]any{"email": o.email, "totp": o.seed != "", "passkeys": o.names, "recoveryRemaining": len(o.hashes)}
-	case "auth/passkey/finish", "auth/mfa", "profile/prove", "profile/finish":
-		f := pending
-		if f.Revision != o.rev {
-			return expired
-		}
-		switch purpose {
-		case "mfa":
-			if e = s.verifySecond(r, tx, o, in.Code); e != nil {
-				return e
-			}
-			login = true
-		case "login", "prove":
-			if e = s.assert(r, tx, o, f, in.Credential); e != nil {
-				return e
-			}
-			if purpose == "login" {
-				login = true
-			} else {
-				change = &f
-			}
-		case "finish":
-			if e = s.finishChange(r, tx, o, f, in); e != nil {
-				return e
-			}
-		}
-		if retry {
-			if _, e = s.loadFlow(r, purpose, true); e != nil {
-				return e
-			}
-		}
-	case "profile/start":
-		if !validChange(o, in) {
-			return errBadRequest("This change is unavailable. Refresh Profile.")
-		}
-		f := flow{Purpose: "prove", Revision: o.rev, SID: s.sid(r), Action: in.Action, Target: in.Target}
-		if in.Method == "passkey" {
-			out, e = s.beginAssertion(w, r, f)
-		} else {
-			if len(in.Password) > 256 || !crypto.VerifyPassword(o.password, in.Password) {
-				return rejected
-			}
-			if o.seed != "" {
-				if e = s.verifySecond(r, tx, o, in.Code); e != nil {
-					return e
-				}
-			}
-			change = &f
-		}
-		if e != nil {
-			return e
-		}
+	if err := t.assert(pending, in.Credential); err != nil {
+		return err
 	}
-	if e = tx.Commit(ctx); e != nil {
-		return e
+	return s.completeLogin(w, t)
+}
+
+func (s *Server) handleMFA(w http.ResponseWriter, r *http.Request, in securityInput) error {
+	pending, err := s.pendingFlow(r, mfa, true)
+	if err != nil {
+		return err
 	}
-	if change != nil {
-		out, e = s.prepareChange(w, r, o, *change)
-		if e != nil {
-			return e
+	t, err := s.beginOwner(r, true)
+	if err != nil {
+		return err
+	}
+	defer t.tx.Rollback(r.Context())
+	if pending.Revision != t.rev {
+		return expired
+	}
+	if err := t.verifySecond(in.Code); err != nil {
+		return err
+	}
+	if _, err := s.loadFlow(r, mfa, true); err != nil {
+		return err
+	}
+	return s.completeLogin(w, t)
+}
+
+func (s *Server) handleChangeStart(w http.ResponseWriter, r *http.Request, in securityInput) error {
+	t, err := s.beginOwner(r, true)
+	if err != nil {
+		return err
+	}
+	defer t.tx.Rollback(r.Context())
+	if !validChange(t.securityOwner, in) {
+		return errBadRequest("This change is unavailable. Refresh Profile.")
+	}
+	f := flow{Purpose: prove, Revision: t.rev, SID: s.sid(r), Action: in.Action, Target: in.Target}
+	if in.Method == "passkey" {
+		out, err := s.beginAssertion(w, r, f)
+		if err != nil {
+			return err
 		}
-	}
-	if login {
-		s.issueSession(w, r, o.rev)
-	} else {
+		if err := t.tx.Commit(r.Context()); err != nil {
+			return err
+		}
 		writeJSON(w, 200, out)
+		return nil
 	}
+	if len(in.Password) > 256 || !crypto.VerifyPassword(t.passwordHash, in.Password) {
+		return rejected
+	}
+	if t.sealedSeed != "" {
+		if err := t.verifySecond(in.Code); err != nil {
+			return err
+		}
+	}
+	if err := t.tx.Commit(r.Context()); err != nil {
+		return err
+	}
+	out, err := s.prepareChange(w, r, t.securityOwner, f)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, out)
+	return nil
+}
+
+func (s *Server) handleChangeProve(w http.ResponseWriter, r *http.Request, in securityInput) error {
+	pending, err := s.pendingFlow(r, prove, false)
+	if err != nil {
+		return err
+	}
+	t, err := s.beginOwner(r, true)
+	if err != nil {
+		return err
+	}
+	defer t.tx.Rollback(r.Context())
+	if pending.Revision != t.rev {
+		return expired
+	}
+	if err := t.assert(pending, in.Credential); err != nil {
+		return err
+	}
+	if err := t.tx.Commit(r.Context()); err != nil {
+		return err
+	}
+	out, err := s.prepareChange(w, r, t.securityOwner, pending)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, out)
+	return nil
+}
+
+func (s *Server) handleChangeFinish(w http.ResponseWriter, r *http.Request, in securityInput) error {
+	pending, err := s.pendingFlow(r, finish, true)
+	if err != nil {
+		return err
+	}
+	t, err := s.beginOwner(r, true)
+	if err != nil {
+		return err
+	}
+	defer t.tx.Rollback(r.Context())
+	if pending.Revision != t.rev {
+		return expired
+	}
+	if err := t.finishChange(pending, in); err != nil {
+		return err
+	}
+	if _, err := s.loadFlow(r, finish, true); err != nil {
+		return err
+	}
+	if err := t.tx.Commit(r.Context()); err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
 	return nil
 }
 
 func validChange(o *securityOwner, in securityInput) bool {
 	switch in.Action {
-	case "enable":
-		return o.seed == ""
-	case "disable", "regenerate", "replace":
-		return o.seed != ""
-	case "add":
+	case enable:
+		return o.sealedSeed == ""
+	case disable, regenerate, replace:
+		return o.sealedSeed != ""
+	case add:
 		return strings.TrimSpace(in.Target) != "" && len(in.Target) <= 80 && len(o.keys) < 32
-	case "remove":
+	case remove:
 		_, ok := o.names[in.Target]
 		return ok
 	}
 	return false
 }
 func (s *Server) prepareChange(w http.ResponseWriter, r *http.Request, o *securityOwner, f flow) (any, error) {
-	f.Purpose = "finish"
+	f.Purpose = finish
 	f.Web = wa.SessionData{}
 	f.Confirmation = rand.Text()
 	result := map[string]any{"confirmation": f.Confirmation}
-	if f.Action == "enable" || f.Action == "replace" {
+	if rotates[f.Action].seed {
 		raw := make([]byte, 20)
 		rand.Read(raw)
 		secret := base32.StdEncoding.EncodeToString(raw)
@@ -401,7 +568,7 @@ func (s *Server) prepareChange(w http.ResponseWriter, r *http.Request, o *securi
 		if e != nil {
 			return nil, e
 		}
-		f.Seed = enc
+		f.SealedSeed = enc
 		uri := "otpauth://totp/" + url.PathEscape("RivoSnap:"+o.email) + "?" + url.Values{"issuer": {"RivoSnap"}, "secret": {secret}}.Encode()
 		png, e := qr.Encode(uri, qr.Medium, 240)
 		if e != nil {
@@ -410,15 +577,15 @@ func (s *Server) prepareChange(w http.ResponseWriter, r *http.Request, o *securi
 		result["secret"] = secret
 		result["qr"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
 	}
-	if f.Action == "enable" || f.Action == "replace" || f.Action == "regenerate" {
+	if rotates[f.Action].codes {
 		codes := make([]string, 8)
 		for i := range codes {
 			codes[i] = rand.Text()
-			f.Hashes = append(f.Hashes, recoveryHash(codes[i]))
+			f.RecoveryHashes = append(f.RecoveryHashes, recoveryHash(codes[i]))
 		}
 		result["codes"] = codes
 	}
-	if f.Action == "add" {
+	if f.Action == add {
 		v, e := s.verifier()
 		if e != nil {
 			return nil, e
@@ -432,52 +599,54 @@ func (s *Server) prepareChange(w http.ResponseWriter, r *http.Request, o *securi
 	}
 	return result, s.saveFlow(w, r, f)
 }
-func (s *Server) finishChange(r *http.Request, tx pgx.Tx, o *securityOwner, f flow, in securityInput) error {
-	ctx := r.Context()
+func (t *ownerTx) finishChange(f flow, in securityInput) error {
+	ctx := t.r.Context()
 	if !crypto.Equal(f.Confirmation, in.Confirmation) {
 		return expired
 	}
-	switch f.Action {
-	case "enable", "regenerate", "replace":
+	if rot, ok := rotates[f.Action]; ok {
 		if !in.Saved {
 			return errBadRequest("Confirm you saved the recovery codes.")
 		}
-		if f.Action == "enable" || f.Action == "replace" {
-			step, e := s.verifyTOTP(f.Seed, in.Code, -1)
+		if rot.seed {
+			step, e := t.s.verifyTOTP(f.SealedSeed, in.Code, -1)
 			if e != nil {
 				return e
 			}
-			o.step = step
-			o.seed = f.Seed
+			t.totpStep = step
+			t.sealedSeed = f.SealedSeed
 		}
-		o.hashes = f.Hashes
-	case "disable":
-		o.seed = ""
-		o.step = -1
-		o.hashes = []string{}
-	case "add":
-		v, e := s.verifier()
-		if e != nil {
-			return e
+		t.recoveryHashes = f.RecoveryHashes
+	} else {
+		switch f.Action {
+		case disable:
+			t.sealedSeed = ""
+			t.totpStep = -1
+			t.recoveryHashes = []string{}
+		case add:
+			v, e := t.s.verifier()
+			if e != nil {
+				return e
+			}
+			cred, e := v.FinishRegistration(t.securityOwner, f.Web, credentialRequest(t.r, in.Credential))
+			if e != nil {
+				return rejected
+			}
+			if _, e = t.tx.Exec(ctx, `INSERT INTO "OwnerPasskey"(id,"ownerId",name,credential) VALUES($1,1,$2,$3)`, cred.ID, f.Target, cred); e != nil {
+				return e
+			}
+		case remove:
+			id, e := base64.RawURLEncoding.DecodeString(f.Target)
+			if e != nil {
+				return e
+			}
+			if _, e = t.tx.Exec(ctx, `DELETE FROM "OwnerPasskey" WHERE id=$1 AND "ownerId"=1`, id); e != nil {
+				return e
+			}
+		default:
+			return expired
 		}
-		cred, e := v.FinishRegistration(o, f.Web, credentialRequest(r, in.Credential))
-		if e != nil {
-			return rejected
-		}
-		if _, e = tx.Exec(ctx, `INSERT INTO "OwnerPasskey"(id,"ownerId",name,credential) VALUES($1,1,$2,$3)`, cred.ID, f.Target, cred); e != nil {
-			return e
-		}
-	case "remove":
-		id, e := base64.RawURLEncoding.DecodeString(f.Target)
-		if e != nil {
-			return e
-		}
-		if _, e = tx.Exec(ctx, `DELETE FROM "OwnerPasskey" WHERE id=$1 AND "ownerId"=1`, id); e != nil {
-			return e
-		}
-	default:
-		return expired
 	}
-	_, e := tx.Exec(ctx, `UPDATE "Owner" SET "securityRevision"="securityRevision"+1,"totpSecret"=$1,"totpStep"=$2,"recoveryHashes"=$3 WHERE id=1`, o.seed, o.step, o.hashes)
+	_, e := t.tx.Exec(ctx, `UPDATE "Owner" SET "securityRevision"="securityRevision"+1,"totpSecret"=$1,"totpStep"=$2,"recoveryHashes"=$3 WHERE id=1`, t.sealedSeed, t.totpStep, t.recoveryHashes)
 	return e
 }

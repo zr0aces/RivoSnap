@@ -64,7 +64,7 @@ corepack pnpm e2e
 - Playwright runs gallery and responsive fixtures locally in Chromium and WebKit. To test owner login and worker health against a **disposable deployment only**, set `E2E_URL` and `E2E_SETUP_KEY`.
 - For host development, export server settings pointing `DATABASE_URL` and `REDIS_URL` to dedicated instances, set `NODE_ENV=development` and `APP_URL=http://localhost:5173`, and run `corepack pnpm migrate`, `corepack pnpm api`, `corepack pnpm worker`, and `corepack pnpm exec vite apps/web` in separate terminals.
 
-- For owner-security browser coverage, run `corepack pnpm exec playwright test e2e/profile.spec.ts --project=chromium` with `E2E_PROFILE_FIXTURE=1` and `E2E_URL` pointing at a **fresh disposable localhost deployment** configured with the test bootstrap key in that spec. This test claims the fixture owner and exercises a Chromium virtual passkey, authenticator enrollment, recovery and revocation.
+- For owner-security browser coverage, run `corepack pnpm exec playwright test e2e/profile.spec.ts --project=chromium` with `E2E_PROFILE_FIXTURE=1` and `E2E_URL` pointing at a **fresh disposable localhost deployment** started with the same `E2E_SETUP_KEY` the test receives. This test claims the fixture owner and exercises a Chromium virtual passkey, authenticator enrollment, recovery and revocation.
 
 ## Handbook
 

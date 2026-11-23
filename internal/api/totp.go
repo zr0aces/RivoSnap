@@ -8,16 +8,20 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/jackc/pgx/v5"
-	"net/http"
-	"rivosnap/internal/crypto"
+	"log"
 	"slices"
 	"strings"
 	"time"
+
+	"rivosnap/internal/crypto"
 )
 
+// normalizeCode makes typed codes canonical: recovery codes are uppercase base32, and users may add spaces or hyphens.
+func normalizeCode(code string) string {
+	return strings.NewReplacer(" ", "", "-", "").Replace(strings.ToUpper(code))
+}
 func recoveryHash(code string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(code)))
+	sum := sha256.Sum256([]byte(normalizeCode(code)))
 	return hex.EncodeToString(sum[:])
 }
 func totpAt(key []byte, step int64) string {
@@ -30,17 +34,20 @@ func totpAt(key []byte, step int64) string {
 	return fmt.Sprintf("%06d", (binary.BigEndian.Uint32(d[offset:])&0x7fffffff)%1000000)
 }
 func (s *Server) verifyTOTP(seed, code string, last int64) (int64, error) {
+	// An unreadable seed fails closed as a rejected proof; the log names no seed or error detail.
 	secret, e := crypto.Open(seed, s.Env.TokenEncryptionKey)
 	if e != nil {
-		return 0, e
+		log.Print("Owner authenticator seed is unreadable; check TOKEN_ENCRYPTION_KEY")
+		return 0, rejected
 	}
 	key, e := base32.StdEncoding.DecodeString(secret)
 	if e != nil {
-		return 0, e
+		log.Print("Owner authenticator seed is unreadable; check TOKEN_ENCRYPTION_KEY")
+		return 0, rejected
 	}
 	now := time.Now().Unix() / 30
 	for _, step := range []int64{now, now - 1, now + 1} {
-		if step > last && crypto.Equal(totpAt(key, step), strings.TrimSpace(code)) {
+		if step > last && crypto.Equal(totpAt(key, step), normalizeCode(code)) {
 			return step, nil
 		}
 	}
@@ -48,25 +55,25 @@ func (s *Server) verifyTOTP(seed, code string, last int64) (int64, error) {
 }
 
 // Caller holds the singleton owner row lock until the proof and its effect commit.
-func (s *Server) verifySecond(r *http.Request, tx pgx.Tx, o *securityOwner, code string) error {
-	if o.seed == "" {
+func (t *ownerTx) verifySecond(code string) error {
+	if t.sealedSeed == "" {
 		return rejected
 	}
-	if len(strings.TrimSpace(code)) == 6 {
-		step, e := s.verifyTOTP(o.seed, code, o.step)
+	if len(normalizeCode(code)) == 6 {
+		step, e := t.s.verifyTOTP(t.sealedSeed, code, t.totpStep)
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec(r.Context(), `UPDATE "Owner" SET "totpStep"=$1 WHERE id=1`, step)
-		o.step = step
+		_, e = t.tx.Exec(t.r.Context(), `UPDATE "Owner" SET "totpStep"=$1 WHERE id=1`, step)
+		t.totpStep = step
 		return e
 	}
 	hash := recoveryHash(code)
-	i := slices.Index(o.hashes, hash)
+	i := slices.Index(t.recoveryHashes, hash)
 	if i < 0 {
 		return rejected
 	}
-	o.hashes = slices.Delete(o.hashes, i, i+1)
-	_, e := tx.Exec(r.Context(), `UPDATE "Owner" SET "recoveryHashes"=$1 WHERE id=1`, o.hashes)
+	t.recoveryHashes = slices.Delete(t.recoveryHashes, i, i+1)
+	_, e := t.tx.Exec(t.r.Context(), `UPDATE "Owner" SET "recoveryHashes"=$1 WHERE id=1`, t.recoveryHashes)
 	return e
 }

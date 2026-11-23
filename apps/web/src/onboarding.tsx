@@ -172,7 +172,7 @@ export function Onboarding({
                           </div>
                         )}
                       </div>
-                      <Link to={s.to} style={{ whiteSpace: "nowrap" }}>
+                      <Link to={s.to}>
                         {s.cta} ↗
                       </Link>
                     </div>

@@ -23,6 +23,7 @@ const surfaces = [
   ["/albums", ".albumFolio"],
   ["/settings?google_error=exchange", ".settingsLedger"],
   ["/health", ".healthCard"],
+  ["/profile", ".profileSecurity"],
   ["/missing", '.workspace > a[href="/"]'],
 ] as const;
 const cases = [

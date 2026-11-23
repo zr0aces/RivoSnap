@@ -37,6 +37,7 @@ test("disposable owner enrolls TOTP and a discoverable passkey, then signs in wi
   test.skip(
     browserName !== "chromium" ||
       process.env["E2E_PROFILE_FIXTURE"] !== "1" ||
+      !process.env["E2E_SETUP_KEY"] ||
       !baseURL ||
       new URL(baseURL).hostname !== "localhost",
   );
@@ -57,7 +58,7 @@ test("disposable owner enrolls TOTP and a discoverable passkey, then signs in wi
   await page.goto("/profile");
   await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByLabel("Setup key").fill("disposable-profile-bootstrap-key");
+  await page.getByLabel("Setup key").fill(process.env["E2E_SETUP_KEY"]!);
   await page.getByRole("button", { name: "Create owner account" }).click();
   await page.getByRole("button", { name: "Add passkey" }).click();
   await page.getByLabel("Passkey name").fill("Fixture phone");
@@ -128,4 +129,32 @@ test("disposable owner enrolls TOTP and a discoverable passkey, then signs in wi
   await expect(
     page.getByRole("button", { name: "Remove passkey: Fixture phone" }),
   ).toHaveCount(0);
+});
+
+test("exhausted sign-in attempt returns to sign-in choices", async ({
+  page,
+}) => {
+  await mockApi(page, normal, "login");
+  await page.route("**/api/v1/auth/login", (route) =>
+    route.fulfill({ json: { mfaRequired: true } }),
+  );
+  await page.route("**/api/v1/auth/mfa", (route) =>
+    route.fulfill({
+      status: 429,
+      json: { error: "Too many incorrect attempts. Start sign-in again." },
+    }),
+  );
+  await page.goto("/");
+  await page.getByLabel("Email", { exact: true }).fill("owner@example.org");
+  await page.getByLabel("Password", { exact: true }).fill("long-fixture-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel("Authenticator or recovery code").fill("000000");
+  await page.getByRole("button", { name: "Verify and sign in" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Too many incorrect attempts. Start sign-in again.",
+  );
+  await expect(
+    page.getByRole("button", { name: "Sign in with a passkey" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
 });
