@@ -22,6 +22,7 @@ import {
 } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import {
+  UserRound,
   LayoutDashboard,
   Images,
   Layers,
@@ -37,9 +38,10 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { Button } from "../../../packages/ui/button";
-import { api, query, labels, type Stats } from "./data";
+import { api, ApiError, query, labels, type Stats } from "./data";
 import { Dashboard, Groups, Settings, Health, healthStatus } from "./workspace";
 import { Library } from "./photos";
+import { Profile, passkeyAvailable, passkeyLogin } from "./profile";
 import "./style.css";
 
 const navSections = [
@@ -59,6 +61,7 @@ const navSections = [
       ["settings", "/settings", Gear],
     ] as const,
   },
+  { title: "ACCOUNT", items: [["profile", "/profile", UserRound]] as const },
 ];
 
 const compactPrimary = [
@@ -72,6 +75,7 @@ const secondaryDestinations = [
   ["groups", "/groups", Users],
   ["health", "/health", HeartPulse],
   ["settings", "/settings", Gear],
+  ["profile", "/profile", UserRound],
 ] as const;
 
 const secondaryPaths = new Set<string>(
@@ -209,12 +213,15 @@ function Brand() {
 }
 
 function Login({ setup }: { setup: boolean }) {
-  const { register, handleSubmit, formState } = useForm<{
+  const { register, handleSubmit, formState, reset } = useForm<{
     email: string;
     password: string;
     bootstrap: string;
   }>();
   const [error, set] = useState("");
+  const [mfaPending, setMfaPending] = useState(false),
+    [code, setCode] = useState(""),
+    [busy, setBusy] = useState(false);
   return (
     <main className="entry">
       <div className="entrySide">
@@ -242,50 +249,148 @@ function Login({ setup }: { setup: boolean }) {
         <span className="mono">LINE → Staging → Google Photos</span>
       </div>
       <form
-        onSubmit={handleSubmit(async (data) => {
-          try {
-            await api("/auth/" + (setup ? "setup" : "login"), "POST", data);
-            await client.invalidateQueries();
-          } catch (e) {
-            set((e as Error).message);
-          }
-        })}
+        onSubmit={
+          mfaPending
+            ? async (event) => {
+                event.preventDefault();
+                setBusy(true);
+                set("");
+                try {
+                  await api("/auth/mfa", "POST", { code });
+                  await client.invalidateQueries();
+                } catch (e) {
+                  set((e as Error).message);
+                  if (e instanceof ApiError && (e.status === 410 || e.status === 429))
+                    setMfaPending(false);
+                } finally {
+                  setCode("");
+                  setBusy(false);
+                }
+              }
+            : handleSubmit(async (data) => {
+                try {
+                  set("");
+                  const result = await api<{ mfaRequired?: boolean }>(
+                    "/auth/" + (setup ? "setup" : "login"),
+                    "POST",
+                    data,
+                  );
+                  if (result.mfaRequired) {
+                    reset();
+                    setMfaPending(true);
+                    return;
+                  }
+                  await client.invalidateQueries();
+                } catch (e) {
+                  set((e as Error).message);
+                }
+              })
+        }
       >
         <small>OWNER ACCESS</small>
         <h2>{setup ? "Create your account" : "Welcome back"}</h2>
         {setup && (
           <p>Use the setup key from your deployment to claim this library.</p>
         )}
-        <label>
-          Email
-          <input
-            required
-            autoComplete="username"
-            type="email"
-            {...register("email")}
-          />
-        </label>
-        <label>
-          Password
-          <input
-            required
-            type="password"
-            autoComplete={setup ? "new-password" : "current-password"}
-            minLength={setup ? 12 : 1}
-            {...register("password")}
-          />
-          {setup && <small>Minimum 12 characters</small>}
-        </label>
-        {setup && (
-          <label>
-            Setup key
-            <input type="password" required {...register("bootstrap")} />
-          </label>
+        {mfaPending ? (
+          <>
+            <label>
+              Authenticator or recovery code
+              <input
+                autoFocus
+                required
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                autoComplete="one-time-code"
+              />
+            </label>
+            <Button disabled={busy}>Verify and sign in</Button>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={async () => {
+                try {
+                  await api("/auth/cancel", "POST");
+                  setMfaPending(false);
+                  setCode("");
+                  set("");
+                } catch (e) {
+                  set((e as Error).message);
+                }
+              }}
+            >
+              Back to sign-in choices
+            </Button>
+          </>
+        ) : (
+          <>
+            {!setup && (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    busy || formState.isSubmitting || !passkeyAvailable()
+                  }
+                  onClick={async () => {
+                    setBusy(true);
+                    set("");
+                    try {
+                      await passkeyLogin();
+                      await client.invalidateQueries();
+                    } catch (e) {
+                      try {
+                        await api("/auth/cancel", "POST");
+                      } catch {}
+                      set((e as Error).message);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Sign in with a passkey
+                </Button>
+                <small>
+                  {passkeyAvailable()
+                    ? "Or use your password"
+                    : "Passkeys are unavailable in this browser or connection. Use your password."}
+                </small>
+              </>
+            )}
+            <label>
+              Email
+              <input
+                required
+                autoComplete="username"
+                type="email"
+                {...register("email")}
+              />
+            </label>
+            <label>
+              Password
+              <input
+                required
+                type="password"
+                autoComplete={setup ? "new-password" : "current-password"}
+                minLength={setup ? 12 : 1}
+                aria-describedby={setup ? "password-help" : undefined}
+                {...register("password")}
+              />
+            </label>
+            {setup && <small id="password-help">Minimum 12 characters</small>}
+            {setup && (
+              <label>
+                Setup key
+                <input type="password" required {...register("bootstrap")} />
+              </label>
+            )}
+            <Button disabled={formState.isSubmitting || busy}>
+              {setup ? "Create owner account" : "Sign in"}{" "}
+              <ArrowUpRight size={16} />
+            </Button>
+          </>
         )}
-        <Button disabled={formState.isSubmitting}>
-          {setup ? "Create owner account" : "Sign in"}{" "}
-          <ArrowUpRight size={16} />
-        </Button>
         <p role="alert">{error}</p>
       </form>
     </main>
@@ -428,6 +533,24 @@ function CompactShellNav({
         id="more-sheet"
         className="moreSheet"
         aria-labelledby="more-sheet-title"
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+          const controls = event.currentTarget.querySelectorAll<HTMLElement>(
+            "button:not(:disabled), a[href]",
+          );
+          const first = controls[0],
+            last = controls[controls.length - 1];
+          const next =
+            event.shiftKey && event.target === first
+              ? last
+              : !event.shiftKey && event.target === last
+                ? first
+                : null;
+          if (next) {
+            event.preventDefault();
+            next.focus();
+          }
+        }}
         onCancel={(e) => {
           e.preventDefault();
           closeToTrigger();
@@ -656,6 +779,7 @@ function App() {
           <Route path="jobs" element={<Library jobs key="jobs" />} />
           <Route path="groups" element={<Groups />} />
           <Route path="albums" element={<Groups albums />} />
+          <Route path="profile" element={<Profile />} />
           <Route path="settings" element={<Settings />} />
           <Route path="health" element={<Health />} />
           <Route

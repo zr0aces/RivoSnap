@@ -35,7 +35,7 @@ A single-owner, private photo and video inbox for authorized personal LINE group
 
 ### 2. Claim & configure
 
-1. Open `APP_URL` and claim the owner account using `BOOTSTRAP_SECRET`.
+1. Open `APP_URL` and claim the owner account using `BOOTSTRAP_SECRET`. In [Profile](docs/OWNER_GUIDE.md#secure-your-owner-account), add a passkey for passwordless sign-in or enable an authenticator for password sign-in. You can use both; neither needs an extra environment variable.
 2. In **Settings**, save your LINE Messaging API credentials **before** verifying the webhook in the LINE Developers Console.
 3. Connect Google Photos via OAuth.
 4. Enable the LINE groups you want to collect from, optionally toggle **Collect videos**, and monitor sync jobs in **Dashboard**, **Gallery**, and **Albums**.
@@ -63,6 +63,8 @@ corepack pnpm e2e
 - `scripts/test-integration.sh` spins up disposable PostgreSQL and Redis containers on loopback, runs embedded SQL migrations via `go run ./cmd/rivosnap migrate`, and tests the webhook-to-gallery flow against mocked providers.
 - Playwright runs gallery and responsive fixtures locally in Chromium and WebKit. To test owner login and worker health against a **disposable deployment only**, set `E2E_URL` and `E2E_SETUP_KEY`.
 - For host development, export server settings pointing `DATABASE_URL` and `REDIS_URL` to dedicated instances, set `NODE_ENV=development` and `APP_URL=http://localhost:5173`, and run `corepack pnpm migrate`, `corepack pnpm api`, `corepack pnpm worker`, and `corepack pnpm exec vite apps/web` in separate terminals.
+
+- For owner-security browser coverage, run `corepack pnpm exec playwright test e2e/profile.spec.ts --project=chromium` with `E2E_PROFILE_FIXTURE=1` and `E2E_URL` pointing at a **fresh disposable localhost deployment** started with the same `E2E_SETUP_KEY` the test receives. This test claims the fixture owner and exercises a Chromium virtual passkey, authenticator enrollment, recovery and revocation.
 
 ## Handbook
 

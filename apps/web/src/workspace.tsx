@@ -1,4 +1,5 @@
 import "./workspace-responsive.css";
+import { WeeklyActivity } from "./weekly-activity";
 import { Onboarding } from "./onboarding";
 import { useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -159,6 +160,7 @@ export function Dashboard() {
       {(!d.synced || sp.has("setup")) && (
         <Onboarding stats={d} prefs={prefs.data} groups={groups.data ?? []} />
       )}
+      <WeeklyActivity />
       <div className="columns">
         <section className="panel">
           <small>STORAGE & CONNECTIONS</small>

@@ -23,6 +23,7 @@ const surfaces = [
   ["/albums", ".albumFolio"],
   ["/settings?google_error=exchange", ".settingsLedger"],
   ["/health", ".healthCard"],
+  ["/profile", ".profileSecurity"],
   ["/missing", '.workspace > a[href="/"]'],
 ] as const;
 const cases = [
@@ -54,13 +55,13 @@ for (const [dataset, data] of Object.entries({ normal, stress })) {
             await expect(page.locator(".healthMiniRow").first()).toBeVisible();
           } else {
             await expect(page.locator("#more-nav-status")).toContainText(
-              "Upload queue: 2 pending; System health: Needs attention",
+              "Upload queue: 1 failed, 1 pending; System health: Needs attention",
             );
           }
         } else {
           await expect(
             page.getByRole("button", {
-              name: auth === "login" ? "Sign in" : "Create owner account",
+              exact: true, name: auth === "login" ? "Sign in" : "Create owner account",
             }),
           ).toBeVisible();
         }

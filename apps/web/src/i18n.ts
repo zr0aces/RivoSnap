@@ -18,6 +18,7 @@ export const labels = {
   albums: "Albums",
   groups: "LINE groups",
   jobs: "Upload queue",
+  profile: "Profile",
   settings: "Settings",
   health: "System health",
 } as const;

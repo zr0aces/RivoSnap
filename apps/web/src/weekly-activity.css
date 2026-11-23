@@ -1,0 +1,86 @@
+.weeklyActivity {
+  min-width: 0;
+}
+.weeklyActivity > p {
+  color: var(--ink-muted);
+}
+.activityLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  padding: 0;
+  list-style: none;
+}
+.activityLegend li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.activityLegend i {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+}
+.weeklyActivity .series0 {
+  background: var(--brand);
+}
+.weeklyActivity .series1 {
+  background: var(--secondary);
+}
+.weeklyActivity .series2 {
+  background: var(--status-ok);
+}
+.activityPlot {
+  display: grid;
+  grid-template-columns: auto repeat(7, minmax(0, 1fr));
+  margin: 1rem 0;
+  font-variant-numeric: tabular-nums;
+}
+.activityScale,
+.activityBars {
+  height: 9rem;
+}
+.activityScale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-right: 0.25rem;
+  color: var(--ink-muted);
+}
+.activityBars {
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  gap: 2%;
+  border-block: 1px solid var(--line);
+}
+.activityBars > div {
+  width: 22%;
+  max-width: 1.5rem;
+  border-radius: 2px 2px 0 0;
+}
+.activityDay time {
+  display: block;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+.weeklyActivity summary {
+  cursor: pointer;
+  width: fit-content;
+  padding-block: 0.6rem;
+}
+.activityTable {
+  overflow-x: auto;
+}
+.activityTable table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.activityTable th,
+.activityTable td {
+  padding: 0.3rem;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+}

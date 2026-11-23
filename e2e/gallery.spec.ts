@@ -8,6 +8,7 @@ test("gallery filters and keyboard-accessible viewer", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Gallery" })).toBeVisible();
   const version = readFileSync(new URL("../VERSION", import.meta.url), "utf8").trimEnd();
   await expect(page.locator(".asideFooter").getByText(`v${version}`, { exact: true })).toBeVisible();
+  await expect(page.locator(".frameNo")).toHaveText(["#003", "#002", "#001"]);
   const trigger = page.getByRole("button", { name: /Photo from Family/ });
   await trigger.focus();
   await trigger.press("Enter");
@@ -31,14 +32,14 @@ test("deployed owner session and health", async ({ page }) => {
   if (await page.getByLabel("Setup key").count()) {
     await page.getByLabel("Setup key").fill(process.env["E2E_SETUP_KEY"]!);
     await page.getByRole("button", { name: "Create owner account" }).click();
-  } else await page.getByRole("button", { name: "Sign in" }).click();
+  } else await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   await page.getByRole("link", { name: "System health" }).click();
   await expect(
     page.locator(".row").filter({ hasText: "worker" }),
   ).toContainText("Online");
   await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
 });
 
 test("logged-out load shows the login form without a reload loop", async ({
@@ -82,5 +83,5 @@ test("sign-out failure stays visible and allows retry", async ({ page }) => {
   await button.click();
   await expect(page.getByRole("alert")).toContainText("Sign-out could not be confirmed");
   await button.click();
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
 });

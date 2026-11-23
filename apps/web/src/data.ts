@@ -15,6 +15,14 @@ export const states = [
 ] as const;
 export type State = (typeof states)[number];
 export const base = "/api/v1";
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 export async function api<T>(
   path: string,
   method = "GET",
@@ -35,7 +43,7 @@ export async function api<T>(
   if (!r.ok) {
     if (r.status === 401 && !path.startsWith("/auth/"))
       window.location.assign("/");
-    throw Error(data?.error ?? "Request failed.");
+    throw new ApiError(r.status, data?.error ?? "Request failed.");
   }
   if (!isJson) throw Error("Unexpected response.");
   return data;
@@ -48,6 +56,7 @@ export const query = <T>(p: string, enabled = true) =>
     enabled,
   });
 export interface Photo {
+  dayNumber?: number; // Gallery list only.
   id: string;
   hasStaging: boolean;
   createdAt: string;

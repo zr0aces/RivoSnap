@@ -158,7 +158,6 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
     sp.get("to") && "Through " + sp.get("to"),
   ].filter(Boolean);
   const d = q.data;
-  const pageOffset = d ? (d.page - 1) * 36 : 0;
 
   return (
     <>
@@ -405,9 +404,9 @@ export function Library({ jobs = false }: { jobs?: boolean }) {
                     )}
                     <div className="photoMeta">
                       <b>{groupName}</b>
-                      <span className="frameNo">
-                        #{String(pageOffset + i + 1).padStart(3, "0")}
-                      </span>
+                      {p.dayNumber != null && (
+                        <span className="frameNo">#{String(p.dayNumber).padStart(3, "0")}</span>
+                      )}
                     </div>
                     <time>{date(p.lineEventTimestamp)}</time>
                   </button>

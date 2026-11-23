@@ -59,6 +59,7 @@ function dataset(stressed: boolean) {
     mediaType: "VIDEO",
     mimeType: "video/mp4",
   });
+  images.forEach((image, index) => { image.dayNumber = images.length - index; });
   const jobs: Photo[] = [
     {
       ...images[stressed ? 2 : 0],
@@ -140,6 +141,12 @@ export async function mockApi(
         worker: "Offline",
         diskPressure: false,
         workerLastProgressAt: timestamp,
+      },
+      "/profile": {
+        email: "owner@example.org",
+        totp: false,
+        passkeys: { "fixture-passkey": longName },
+        recoveryRemaining: 0,
       },
     };
     return path in values

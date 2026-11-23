@@ -337,12 +337,10 @@ func (s *Server) Handler() http.Handler {
 			writeErr(w, err)
 			return
 		}
-		sid := s.sid(r)
-		authed := false
-		if sid != "" {
-			if n, err := s.Redis.Exists(ctx, "session:"+sid).Result(); err == nil && n > 0 {
-				authed = true
-			}
+		_, authed, err := s.sessionRevision(r, s.sid(r))
+		if err != nil {
+			writeErr(w, err)
+			return
 		}
 		writeJSON(w, 200, map[string]bool{
 			"setup":         count == 0,
@@ -353,6 +351,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/setup", func(w http.ResponseWriter, r *http.Request) {
 		s.handleAuth(w, r, "setup")
 	})
+	s.securityRoutes(mux)
 	mux.HandleFunc("POST /api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		s.handleAuth(w, r, "login")
 	})
@@ -403,6 +402,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/v1/jobs/{id}/discard", s.handleDiscardJob)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/retry", s.handleRetryJob)
+	mux.HandleFunc("GET /api/v1/dashboard/activity", s.handleDashboardActivity)
 	mux.HandleFunc("GET /api/v1/dashboard/stats", s.handleDashboardStats)
 	mux.Handle("/api/", http.NotFoundHandler())
 	mux.Handle("/", newSPAHandler(web.Dist()))
@@ -429,16 +429,21 @@ func (s *Server) Handler() http.Handler {
 			if strings.HasPrefix(urlPath, "/api/") &&
 				urlPath != "/api/v1/auth/status" &&
 				urlPath != "/api/v1/auth/login" &&
-				urlPath != "/api/v1/auth/setup" {
+				urlPath != "/api/v1/auth/setup" && !publicSecurityRoute(r.Method, urlPath) {
 				if sid == "" {
 					writeJSON(w, 401, map[string]string{"error": "Sign in to continue."})
 					return
 				}
-				n, err := s.Redis.Exists(r.Context(), "session:"+sid).Result()
-				if err != nil || n == 0 {
+				rev, valid, err := s.sessionRevision(r, sid)
+				if err != nil {
+					writeErr(w, err)
+					return
+				}
+				if !valid {
 					writeJSON(w, 401, map[string]string{"error": "Sign in to continue."})
 					return
 				}
+				r = r.WithContext(context.WithValue(r.Context(), revisionContextKey{}, rev))
 			}
 		}
 
@@ -495,6 +500,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request, mode string)
 		writeErr(w, errBadRequest("Invalid request. Check the submitted values."))
 		return
 	}
+	rev := int64(1)
 	if mode == "setup" {
 		var count int
 		if err := s.DB.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM "Owner"`).Scan(&count); err != nil {
@@ -520,7 +526,8 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request, mode string)
 		}
 	} else {
 		var email, passwordHash string
-		err := s.DB.Pool.QueryRow(ctx, `SELECT "email", "passwordHash" FROM "Owner" WHERE id = 1`).Scan(&email, &passwordHash)
+		var mfa bool
+		err := s.DB.Pool.QueryRow(ctx, `SELECT "email", "passwordHash","securityRevision","totpSecret" != '' FROM "Owner" WHERE id = 1`).Scan(&email, &passwordHash, &rev, &mfa)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			writeErr(w, err)
 			return
@@ -529,14 +536,37 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request, mode string)
 			writeJSON(w, 401, map[string]string{"error": "Email or password is incorrect."})
 			return
 		}
+		if mfa {
+			err := s.saveFlow(w, r, flow{Purpose: "mfa", Revision: rev})
+			if err != nil {
+				writeErr(w, err)
+				return
+			}
+			writeJSON(w, 200, map[string]bool{"mfaRequired": true})
+			return
+		}
 	}
-	sidBytes := make([]byte, 32)
-	_, _ = rand.Read(sidBytes)
-	sid := hex.EncodeToString(sidBytes)
-	if err := s.Redis.Set(ctx, "session:"+sid, "1", 43200*time.Second).Err(); err != nil {
+	sid, err := s.newSession(ctx, rev)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
+	s.setSessionCookie(w, sid)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// newSession stores a session for revision rev and returns its id. The id reaches the browser only through setSessionCookie.
+func (s *Server) newSession(ctx context.Context, rev int64) (string, error) {
+	sidBytes := make([]byte, 32)
+	_, _ = rand.Read(sidBytes)
+	sid := hex.EncodeToString(sidBytes)
+	if err := s.Redis.Set(ctx, "session:"+sid, sessionValue(rev), 43200*time.Second).Err(); err != nil {
+		return "", err
+	}
+	return sid, nil
+}
+
+func (s *Server) setSessionCookie(w http.ResponseWriter, sid string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
 		Value:    crypto.SignCookie(sid, s.Env.SessionSecret),
@@ -546,7 +576,6 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request, mode string)
 		Secure:   s.Env.NodeEnv == "production",
 		MaxAge:   43200,
 	})
-	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -1404,18 +1433,27 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request, isJobs
 
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, (page-1)*36, 36)
+	// Count only the card's Bangkok day, independently of filters and pagination.
+	// At equal timestamps, larger IDs are displayed later and have lower numbers.
+	frameColumn := "NULL::bigint"
+	if !isJobs {
+		frameColumn = `(SELECT count(*) FROM "Image" f
+		  WHERE f."lineEventTimestamp" >= date_trunc('day', i."lineEventTimestamp", 'Asia/Bangkok')
+		    AND f."lineEventTimestamp" <= i."lineEventTimestamp"
+		    AND (f."lineEventTimestamp" < i."lineEventTimestamp" OR f.id >= i.id))`
+	}
 	querySQL := fmt.Sprintf(
 		`SELECT i."id", i."lineGroupId", i."channelId", i."lineMessageId", i."lineEventTimestamp",
 		        i."mediaType", i."durationMs", i."mimeType", i."fileSize", i."width", i."height",
 		        i."sha256", i."googleMediaItemId", i."productUrl", i."uploadStatus"::text,
 		        i."stagingPath", i."uploadedAt", i."errorCode", i."lastError", i."createdAt", i."updatedAt",
-		        g."displayName"
+		        g."displayName", %s
 		 FROM "Image" i
 		 JOIN "LineGroup" g ON g."lineGroupId" = i."lineGroupId"
 		 %s
 		 ORDER BY i."lineEventTimestamp" DESC, i."id" ASC
 		 OFFSET $%d LIMIT $%d`,
-		whereSQL, argIdx, argIdx+1,
+		frameColumn, whereSQL, argIdx, argIdx+1,
 	)
 
 	rows, err := s.DB.Pool.Query(ctx, querySQL, queryArgs...)
@@ -1431,6 +1469,7 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request, isJobs
 		var lineEventTS, createdAt, updatedAt time.Time
 		var durationMs, fileSize, width, height *int
 		var mimeType, sha256, googleMediaItemID, productURL, stagingPath, errorCode, lastError, groupDisplayName *string
+		var dayNumber *int64
 		var uploadedAt *time.Time
 
 		if err := rows.Scan(
@@ -1438,12 +1477,12 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request, isJobs
 			&mediaType, &durationMs, &mimeType, &fileSize, &width, &height,
 			&sha256, &googleMediaItemID, &productURL, &uploadStatus,
 			&stagingPath, &uploadedAt, &errorCode, &lastError, &createdAt, &updatedAt,
-			&groupDisplayName,
+			&groupDisplayName, &dayNumber,
 		); err != nil {
 			writeErr(w, err)
 			return
 		}
-		items = append(items, map[string]any{
+		item := map[string]any{
 			"id":                 id,
 			"lineGroupId":        lineGroupID,
 			"channelId":          channelID,
@@ -1466,7 +1505,15 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request, isJobs
 			"updatedAt":          fmtTime(updatedAt),
 			"group":              map[string]any{"displayName": groupDisplayName},
 			"hasStaging":         stagingPath != nil && *stagingPath != "",
-		})
+		}
+		if dayNumber != nil {
+			item["dayNumber"] = *dayNumber
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		writeErr(w, err)
+		return
 	}
 
 	writeJSON(w, 200, map[string]any{
@@ -2045,7 +2092,7 @@ func (s *Server) handleDashboardStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func openAPISpec() map[string]any {
-	return map[string]any{
+	spec := map[string]any{
 		"openapi": "3.0.3",
 		"info": map[string]any{
 			"title":   "RivoSnap",
@@ -2071,7 +2118,7 @@ func openAPISpec() map[string]any {
 				"post": map[string]any{"tags": []string{"auth"}, "summary": "POST /auth/setup"},
 			},
 			"/api/v1/auth/login": map[string]any{
-				"post": map[string]any{"tags": []string{"auth"}, "summary": "POST /auth/login"},
+				"post": map[string]any{"tags": []string{"auth"}, "summary": "Verify password; issue a session or return mfaRequired with a pending attempt"},
 			},
 			"/api/v1/auth/logout": map[string]any{
 				"post": map[string]any{"tags": []string{"auth"}, "summary": "POST /auth/logout"},
@@ -2135,9 +2182,21 @@ func openAPISpec() map[string]any {
 			"/api/v1/jobs/{id}/retry": map[string]any{
 				"post": map[string]any{"tags": []string{"jobs"}, "summary": "POST /jobs/:id/retry"},
 			},
+			"/api/v1/dashboard/activity": map[string]any{
+				"get": map[string]any{"tags": []string{"dashboard"}, "summary": "Daily media received and uploaded by type, last seven Bangkok dates"},
+			},
 			"/api/v1/dashboard/stats": map[string]any{
 				"get": map[string]any{"tags": []string{"dashboard"}, "summary": "GET /dashboard/stats"},
 			},
 		},
 	}
+	paths := spec["paths"].(map[string]any)
+	for path, route := range securityPaths {
+		op := map[string]any{"tags": []string{"auth"}, "summary": route.summary}
+		if !route.public {
+			op["security"] = []any{map[string]any{"session": []string{}}}
+		}
+		paths[secBase+path] = map[string]any{strings.ToLower(route.method): op}
+	}
+	return spec
 }

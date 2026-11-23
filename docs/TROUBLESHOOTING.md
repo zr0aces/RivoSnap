@@ -3,6 +3,8 @@
 | Symptom | Operator action |
 |---|---|
 | Setup denied | Use the deployment's bootstrap key only for first claim. If an owner exists, sign in. A mismatched APP_URL or proxy rewriting Origin blocks browser writes. |
+| Passkey unavailable or not found | Open the exact HTTPS `APP_URL` in a supported browser and choose a device or password manager holding a registered passkey. If the hostname changed, use password sign-in and enroll a new passkey. Enrolled authenticator MFA still applies to passwords. |
+| Authenticator code rejected or phone lost | Check that the phone and server clocks are synchronized and try the next code, not one already used. If the attempt expired, restart sign-in. Use a registered passkey or your password plus an unused recovery code, then [replace the lost method in Profile](OWNER_GUIDE.md#secure-your-owner-account). |
 | Webhook Verify fails | Check public TLS, exact URL, unmodified body and matching channel secret. Enable redelivery. A full staging disk returns a temporary error rather than dropping images. |
 | Missing group | Enable LINE group participation and invite the correct Official Account. Direct messages and rooms never register. An already joined group can be discovered by a new group image but stays disabled. |
 | No image after enabling | Send a **new image** after enablement. Check membership, configuration and worker heartbeat. LINE_404/410 means content is no longer available; sending a new image is required. |
@@ -14,6 +16,7 @@
 | Disk pressure | Free unrelated files or expand the volume. Resolve uploads, wait for synced cleanup, or explicitly discard an expired stopped original after inspecting it. Do not manually delete active staging files. Discard is irreversible and never deletes Google Photos media. |
 | Cache miss | Synced images are served by resolving their Google IDs. Reconnect and Validate if remote reads fail. A manually deleted or moved remote item may no longer resolve. |
 | Stale worker | Check worker logs, Redis AOF volume and PostgreSQL readiness. Restart worker; unacknowledged outbox rows replay. Never flush production Redis or drop the outbox to clear the queue. |
+| Playwright fails to launch: missing shared libraries | `playwright install --with-deps` needs sudo. Without it, fetch the missing library packages into a private directory and set `LD_LIBRARY_PATH` to it for that run. Chromium has been verified this way. WebKit also needs the GTK libraries and has not been run without them, so run WebKit e2e on a host where `--with-deps` works. |
 | Timestamps 7 hours ahead / first photos after enabling were missed | Older builds wrote database timestamps in Asia/Bangkok wall clock instead of UTC, so `enabledSince` and the outbox schedule ran 7 hours ahead. Run the one-off [UTC timestamp repair](#one-off-utc-timestamp-repair) before starting the build that pins the session timezone to UTC, with `api` and `worker` stopped. |
 
 ## Check the network path
